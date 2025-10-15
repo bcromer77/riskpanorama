@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "next.config.ts", "use": "@vercel/next" }
+  ],
+  "env": {
+    "MONGODB_URI": "@mongodb_uri",
+    "VOYAGE_API_KEY": "@voyage_api_key",
+    "OPENAI_API_KEY": "@openai_api_key"
+  },
+  "ignoreCommand": "echo 'Using .vercelignore for cleanup'",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
+
