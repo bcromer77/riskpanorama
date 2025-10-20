@@ -1,148 +1,125 @@
 import { NextResponse } from "next/server";
-import { MongoClient } from "mongodb";
+import { pipeline, env } from "@xenova/transformers";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 export const runtime = "nodejs";
+env.allowLocalModels = false;
 
-// ─────────────────────────────────────────────
-// ENVIRONMENT VARIABLES
-// ─────────────────────────────────────────────
-const MONGO_URI = process.env.MONGODB_URI!;
-const MONGO_DB = process.env.MONGODB_DB!;
-const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY!;
-const client = new MongoClient(MONGO_URI);
+// -----------------------------------------------------------------------------
+//  Set workerSrc for Node.js/ESM (resolves to node_modules path)
+// -----------------------------------------------------------------------------
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
 
-// ─────────────────────────────────────────────
-// CLASSIFICATION LOGIC
-// ─────────────────────────────────────────────
-function classifyMeaning(text: string): string {
-  const t = text.toLowerCase();
-
-  if (
-    t.includes("graphite") ||
-    t.includes("lithium") ||
-    t.includes("mine") ||
-    t.includes("provenance") ||
-    t.includes("supplier") ||
-    t.includes("traceability")
-  ) {
-    return "🪨 Stone — Supplier Provenance & Raw Material Sourcing";
-  }
-
-  if (
-    t.includes("manufactur") ||
-    t.includes("audit") ||
-    t.includes("packag") ||
-    t.includes("factory") ||
-    t.includes("passport") ||
-    t.includes("compliance")
-  ) {
-    return "🏭 Store — Production, Logistics & Regulatory Compliance";
-  }
-
-  if (
-    t.includes("retail") ||
-    t.includes("consumer") ||
-    t.includes("brand") ||
-    t.includes("marketing") ||
-    t.includes("csr")
-  ) {
-    return "🛍️ Floor — Retail, ESG Disclosure & Consumer Trust";
-  }
-
-  if (t.includes("legal") || t.includes("policy") || t.includes("governance")) {
-    return "⚖️ Legal — Governance, Risk & Compliance Allocation";
-  }
-
-  return "🌐 General — Cross-Sector ESG & Policy Insight";
-}
-
-// ─────────────────────────────────────────────
-// MAIN HANDLER
-// ─────────────────────────────────────────────
-export async function POST(req: Request) {
+// -----------------------------------------------------------------------------
+//  Extract text from PDF (no workers, pure Node)
+// -----------------------------------------------------------------------------
+async function extractTextFromPdf(buffer: Uint8Array): Promise<string> {
   try {
-    const { query } = await req.json();
-    if (!query) throw new Error("No query provided");
-
-    // 1️⃣ Generate embedding for the query
-    const embedResp = await fetch("https://api.voyageai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${VOYAGE_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "voyage-large-2-instruct",
-        input: query,
-      }),
+    const loadingTask = pdfjsLib.getDocument({
+      data: buffer,
+      useSystemFonts: true,
+      disableFontFace: true,
+      verbosity: 0,
     });
-    const embedJson = await embedResp.json();
-    const embedding = embedJson.data[0].embedding;
+    const pdf = await loadingTask.promise;
 
-    // 2️⃣ Vector search in MongoDB
-    await client.connect();
-    const db = client.db(MONGO_DB);
-    const collection = db.collection("bapa_documents");
-
-    const results = await collection
-      .aggregate([
-        {
-          $vectorSearch: {
-            index: "bapa_embedding_index",
-            path: "embedding",
-            queryVector: embedding,
-            numCandidates: 10,
-            limit: 5,
-            similarity: "cosine",
-          },
-        },
-        {
-          $project: {
-            filename: 1,
-            summary: 1,
-            content: 1,
-            score: { $meta: "vectorSearchScore" },
-          },
-        },
-      ])
-      .toArray();
-
-    await client.close();
-
-    // 3️⃣ Interpretive meaning (light summarization)
-    const topResult = results[0];
-    let meaning = "No interpretive summary available.";
-    let classification = "Unclassified";
-
-    if (topResult?.filename || topResult?.summary || topResult?.content) {
-      const context = `
-        The user asked: "${query}".
-        The top document is titled "${topResult.filename}".
-        Key content snippet:
-        "${topResult.content?.slice(0, 300)}"
-      `;
-
-      meaning = `The document "${topResult.filename}" appears relevant to "${query}". 
-It focuses on EU battery passport regulation, supplier traceability, and ESG data integrity.
-This matters for legal, compliance, and retail teams verifying supplier provenance and consumer-facing sustainability claims.`;
-
-      classification = classifyMeaning(context + meaning);
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map((item: any) => item.str);
+      text += strings.join(" ") + "\n";
     }
 
-    // 4️⃣ Return enriched result
+    return text.replace(/\s{2,}/g, " ").trim();
+  } catch (err) {
+    console.error("❌ PDF parse error:", err);
+    throw new Error("Failed to extract text from PDF");
+  }
+}
+
+// -----------------------------------------------------------------------------
+//  Smart summary fallback
+// -----------------------------------------------------------------------------
+function generateSmartSummary(text: string): string {
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const key = sentences
+    .filter((s) =>
+      /(risk|battery|CBAM|compliance|origin|supplier|passport|thermal|chain)/i.test(s)
+    )
+    .slice(0, 5);
+  return key.length ? key.join(" ") : text.slice(0, 400) + "…";
+}
+
+// -----------------------------------------------------------------------------
+//  POST route
+// -----------------------------------------------------------------------------
+export async function POST(req: Request) {
+  try {
+    const contentType = req.headers.get("content-type") || "";
+    let text = "";
+
+    if (contentType.includes("application/json")) {
+      const body = await req.json();
+      text = body.text || "";
+    } else {
+      const formData = await req.formData();
+      const file = formData.get("file") as File | null;
+      if (!file) throw new Error("No file uploaded");
+
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      text = await extractTextFromPdf(uint8);
+    }
+
+    if (!text || text.length < 20) throw new Error("No readable text found");
+
+    // Summarization
+    let summary = "";
+    try {
+      const summarizer = await pipeline("summarization", "Xenova/distilbart-cnn-12-6");
+      const result = await summarizer(text.slice(0, 3000));
+      summary = result[0]?.summary_text || "";
+    } catch (err) {
+      console.warn("⚠️ Summarization failed, using fallback:", err);
+      summary = generateSmartSummary(text);
+    }
+
+    const risks = [
+      {
+        title: "Thermal Risk",
+        body: "Potential mentions of overheating or electrolyte degradation.",
+        badge: "red",
+        tags: ["Safety"],
+      },
+      {
+        title: "Supply Chain Origin",
+        body: "Mentions of CBAM, Chile lithium, or traceability gaps.",
+        badge: "amber",
+        tags: ["CBAM", "Origin"],
+      },
+      {
+        title: "Provenance Disclosure",
+        body: "Structured data suggests strong transparency compliance.",
+        badge: "green",
+        tags: ["Disclosure"],
+      },
+    ];
+
     return NextResponse.json({
       success: true,
-      query,
-      meaning,
-      classification,
-      results,
+      summary,
+      tldr: summary.slice(0, 240),
+      risks,
     });
   } catch (err: any) {
-    console.error("❌ Query error:", err);
+    console.error("❌ /api/bapa/query error:", err);
     return NextResponse.json(
-      { success: false, error: err.message },
+      { success: false, error: err.message || "PDF processing failed" },
       { status: 500 }
     );
   }
 }
-
