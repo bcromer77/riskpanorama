@@ -1,40 +1,18 @@
 import { NextResponse } from "next/server";
 import { pipeline, env } from "@xenova/transformers";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 export const runtime = "nodejs";
 env.allowLocalModels = false;
 
 // -----------------------------------------------------------------------------
-//  Set workerSrc for Node.js/ESM (resolves to node_modules path)
-// -----------------------------------------------------------------------------
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url
-).toString();
-
-// -----------------------------------------------------------------------------
-//  Extract text from PDF (no workers, pure Node)
+//  Extract text from PDF using pdf-parse (Node-safe, no DOM)
 // -----------------------------------------------------------------------------
 async function extractTextFromPdf(buffer: Uint8Array): Promise<string> {
   try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: buffer,
-      useSystemFonts: true,
-      disableFontFace: true,
-      verbosity: 0,
-    });
-    const pdf = await loadingTask.promise;
-
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const strings = content.items.map((item: any) => item.str);
-      text += strings.join(" ") + "\n";
-    }
-
-    return text.replace(/\s{2,}/g, " ").trim();
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(Buffer.from(buffer));
+    return data.text.replace(/\s{2,}/g, " ").trim();
   } catch (err) {
     console.error("❌ PDF parse error:", err);
     throw new Error("Failed to extract text from PDF");
