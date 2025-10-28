@@ -1,29 +1,36 @@
-// lib/mongodb.ts
-import { MongoClient } from 'mongodb';
+import { MongoClient } from "mongodb";
 
-if (!process.env.MONGODB_URI) {
-  throw new Error('Please add your MongoDB URI to .env.local');
+const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+
+if (!uri) {
+  throw new Error("Missing MONGO_URI in environment");
 }
 
-const uri = process.env.MONGODB_URI;
-const options = {};
-
-let client: MongoClient;
+let client;
 let clientPromise: Promise<MongoClient>;
 
-if (process.env.NODE_ENV === 'development') {
-  let globalWithMongo = global as typeof globalThis & {
-    _mongoClientPromise?: Promise<MongoClient>;
-  };
+declare global {
+  // allow global caching in dev
+  var _mongoClientPromise: Promise<MongoClient> | undefined;
+}
 
-  if (!globalWithMongo._mongoClientPromise) {
-    client = new MongoClient(uri, options);
-    globalWithMongo._mongoClientPromise = client.connect();
+if (process.env.NODE_ENV === "development") {
+  if (!global._mongoClientPromise) {
+    client = new MongoClient(uri);
+    global._mongoClientPromise = client.connect();
   }
-  clientPromise = globalWithMongo._mongoClientPromise;
+  clientPromise = global._mongoClientPromise;
 } else {
-  client = new MongoClient(uri, options);
+  client = new MongoClient(uri);
   clientPromise = client.connect();
 }
 
+export const getDatabases = async () => {
+  const client = await clientPromise;
+  const dbV = client.db(process.env.DB_VERACITY);
+  const dbR = client.db(process.env.DB_PANORAMA);
+  return { dbV, dbR };
+};
+
 export default clientPromise;
+
