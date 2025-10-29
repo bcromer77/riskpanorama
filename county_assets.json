@@ -1,0 +1,36 @@
+[
+  {
+    "county": "Tipperary",
+    "asset_name": "Bansha Substation",
+    "operator": "ESB Networks",
+    "risk_type": ["cyber", "continuity", "supply_chain"],
+    "nis2_relevance": "Essential entity: energy distribution",
+    "governance_owner": "Tipperary County Council Emergency Manager",
+    "recovery_time_objective_hours": 4,
+    "notes": "Remote SCADA access via 4G modem, contractor-maintained",
+    "geo": { "lat": 52.409, "lon": -7.965 }
+  },
+  {
+    "county": "Tipperary",
+    "asset_name": "Clonmel Wastewater Pump Station",
+    "operator": "Irish Water",
+    "risk_type": ["continuity", "environmental"],
+    "nis2_relevance": "Critical water infrastructure under NIS2 scope",
+    "governance_owner": "Tipperary County Council Water Services",
+    "recovery_time_objective_hours": 8,
+    "notes": "Backup genset onsite; vulnerable to flood surge during storms",
+    "geo": { "lat": 52.353, "lon": -7.704 }
+  },
+  {
+    "county": "Tipperary",
+    "asset_name": "Cahir Community Battery Pilot",
+    "operator": "Local Energy Co-op",
+    "risk_type": ["funding", "innovation"],
+    "nis2_relevance": "Not essential, supports resilience and microgrid flexibility",
+    "governance_owner": "Cahir Renewable Hub",
+    "recovery_time_objective_hours": 1,
+    "notes": "1 MW / 2 MWh storage system used for peak shaving and community grid support",
+    "geo": { "lat": 52.374, "lon": -7.921 }
+  }
+]
+
