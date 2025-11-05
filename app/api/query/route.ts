@@ -1,121 +1,113 @@
-// app/api/query/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import clientPromise from '@/lib/mongodb';
+import { NextRequest, NextResponse } from "next/server";
+import { MongoClient } from "mongodb";
 
-async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await fetch('https://api.voyageai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.VOYAGE_API_KEY}`
-    },
-    body: JSON.stringify({
-      input: text,
-      model: 'voyage-large-2'
-    })
-  });
+const MONGODB_URI = process.env.MONGODB_URI!;
+const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY!;
+const client = new MongoClient(MONGODB_URI);
 
-  const data = await response.json();
-  return data.data[0].embedding;
-}
-
-async function generateAnswer(question: string, context: string): Promise<string> {
-  const prompt = `You are an expert supply chain risk analyst helping retailers identify product quality issues and return risks.
-
-Context from technical documents:
-${context}
-
-Question: ${question}
-
-Analyze the context and provide a clear, detailed answer identifying:
-- Specific defects or quality issues
-- Safety concerns
-- Components that don't meet specifications
-- Potential causes of customer returns
-- Brand-specific risks
-
-Answer:`;
-
-  const response = await fetch('https://api.voyageai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.VOYAGE_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: 'voyage-chat-1',
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      max_tokens: 1000,
-      temperature: 0.7
-    })
-  });
-
-  const data = await response.json();
-  return data.choices[0].message.content;
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const { question } = await request.json();
-    
-    if (!question) {
-      return NextResponse.json({ error: 'No question provided' }, { status: 400 });
+    const body = await req.json();
+    const { question, researcher = "galina-kennedy" } = body;
+
+    if (!question)
+      return NextResponse.json({ error: "No question provided" }, { status: 400 });
+
+    // 1️⃣ Generate embedding for the question
+    const embedRes = await fetch("https://api.voyageai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${VOYAGE_API_KEY}`,
+      },
+      body: JSON.stringify({
+        input: question,
+        model: "voyage-large-2",
+      }),
+    });
+
+    const embedData = await embedRes.json();
+    const queryVector = embedData.data[0].embedding;
+
+    // 2️⃣ Connect to Mongo
+    await client.connect();
+    const db = client.db("veracity101");
+    const col = db.collection("talk_chunks");
+
+    // 3️⃣ Run vector search scoped to researcher
+    const results = await col
+      .aggregate([
+        {
+          $vectorSearch: {
+            index: "vector_index",
+            path: "embedding",
+            queryVector,
+            numCandidates: 100,
+            limit: 5,
+            filter: { researcher },
+          },
+        },
+        {
+          $project: {
+            text: 1,
+            fileName: 1,
+            score: { $meta: "vectorSearchScore" },
+          },
+        },
+      ])
+      .toArray();
+
+    if (!results.length) {
+      return NextResponse.json({
+        answer: "No relevant context found in uploaded documents.",
+      });
     }
 
-    // Generate embedding for the question
-    const queryEmbedding = await generateEmbedding(question);
-    
-    // Search MongoDB using vector search
-    const client = await clientPromise;
-    const db = client.db('supply_chain_risk');
-    const collection = db.collection('documents');
-    
-    const results = await collection.aggregate([
-      {
-        $vectorSearch: {
-          index: 'vector_index',
-          path: 'embedding',
-          queryVector: queryEmbedding,
-          numCandidates: 100,
-          limit: 5
-        }
+    // 4️⃣ Build context for summarization
+    const context = results.map(r => r.text).join("\n\n");
+
+    // 5️⃣ Ask Voyage to summarise answer
+    const completion = await fetch("https://api.voyageai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${VOYAGE_API_KEY}`,
       },
-      {
-        $project: {
-          text: 1,
-          metadata: 1,
-          score: { $meta: 'vectorSearchScore' }
-        }
-      }
-    ]).toArray();
-    
-    // Build context from results
-    const context = results
-      .map(r => `[Source: ${r.metadata.source}]\n${r.text}`)
-      .join('\n\n---\n\n');
-    
-    // Generate answer using Voyage
-    const answer = await generateAnswer(question, context);
-    
+      body: JSON.stringify({
+        model: "voyage-chat-1",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an expert assistant summarising Galina Kennedy’s technical research in plain language.",
+          },
+          {
+            role: "user",
+            content: `Context:\n${context}\n\nQuestion: ${question}\nAnswer clearly and concisely.`,
+          },
+        ],
+        max_tokens: 500,
+      }),
+    });
+
+    const completionData = await completion.json();
+    const answer = completionData?.choices?.[0]?.message?.content || "No answer generated.";
+
     return NextResponse.json({
       answer,
       sources: results.map(r => ({
-        source: r.metadata.source,
+        file: r.fileName,
         score: r.score,
-        excerpt: r.text.substring(0, 200) + '...'
-      }))
+      })),
     });
-    
-  } catch (error) {
-    console.error('Query error:', error);
+  } catch (err: any) {
+    console.error("❌ Query error:", err);
     return NextResponse.json(
-      { error: 'Failed to process query' },
+      { error: "Failed to query database", details: err.message },
       { status: 500 }
     );
+  } finally {
+    await client.close();
   }
 }
+

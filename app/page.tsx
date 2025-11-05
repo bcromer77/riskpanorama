@@ -1,132 +1,93 @@
-// app/page.tsx
-
 "use client";
+import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 
-import { ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+export default function HeroPrism() {
+  const router = useRouter();
 
-export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 text-slate-900">
-      {/* Navigation bar placeholder (already in layout) */}
+    <div className="relative min-h-screen flex flex-col items-center justify-center bg-black text-white overflow-hidden">
+      {/* Ambient gradient glow */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 0.3 }}
+        className="absolute inset-0 bg-gradient-to-tr from-black via-slate-800/20 to-amber-500/10 blur-3xl"
+      />
 
-      {/* Hero Section */}
-      <section className="max-w-5xl mx-auto px-6 pt-24 pb-16 text-center">
-        <h1 className="text-5xl md:text-6xl font-light mb-6 leading-tight">
-          Know What’s Real — <br className="hidden md:block" /> From Shelf to Source.
+      {/* Incoming white light beam */}
+      <motion.div
+        initial={{ opacity: 0, scaleX: 0 }}
+        animate={{ opacity: 0.8, scaleX: 1 }}
+        transition={{ duration: 3, ease: 'easeOut', delay: 0.5 }}
+        className="absolute top-1/2 left-0 w-1/2 h-[2px] bg-gradient-to-r from-white via-white/90 to-transparent blur-[1px]"
+        style={{ transformOrigin: "left" }}
+      />
+
+      {/* Prism core */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 2, ease: "easeOut" }}
+        className="relative flex items-center justify-center mb-10"
+      >
+        {/* Triangular prism */}
+        <motion.div
+          animate={{ rotateY: [0, 180, 360] }}
+          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+          className="w-64 h-64 bg-gradient-to-tr from-zinc-900 to-slate-300/20 rounded-[2rem] blur-[1px] shadow-[0_0_80px_rgba(255,255,255,0.15)]"
+          style={{ clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)" }}
+        />
+      </motion.div>
+
+      {/* Outgoing refracted beams */}
+      <motion.div
+        className="absolute top-[52%] left-[52%] w-[40vw] h-[1.5px] bg-gradient-to-r from-amber-400 via-orange-400/70 to-transparent origin-left blur-sm"
+        animate={{ opacity: [0.5, 1, 0.5] }}
+        transition={{ duration: 4, repeat: Infinity }}
+      />
+      <motion.div
+        className="absolute top-[48%] left-[52%] w-[38vw] h-[1.5px] bg-gradient-to-r from-sky-400 via-cyan-300/80 to-transparent origin-left blur-sm"
+        animate={{ opacity: [0.4, 1, 0.4] }}
+        transition={{ duration: 5, repeat: Infinity, delay: 1 }}
+      />
+      <motion.div
+        className="absolute top-[56%] left-[52%] w-[36vw] h-[1.5px] bg-gradient-to-r from-pink-400 via-fuchsia-400/70 to-transparent origin-left blur-sm"
+        animate={{ opacity: [0.4, 1, 0.4] }}
+        transition={{ duration: 5.5, repeat: Infinity, delay: 2 }}
+      />
+
+      {/* Headline & CTA */}
+      <motion.div
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1 }}
+        className="text-center max-w-3xl px-8"
+      >
+        <h1 className="text-5xl md:text-6xl font-serif tracking-tight mb-4">
+          The Prism of Power
         </h1>
-        <p className="text-xl text-slate-600 mb-10 leading-relaxed">
-          Veracity 101 gives you <span className="font-semibold text-emerald-700">proof of provenance</span> 
-          across minerals, medicine, food, and ESG — connecting every SKU backwards to its origin.
+        <p className="text-lg text-slate-300 mb-8">
+          Turning filings, protests, and regulations into foresight.
         </p>
-
-        <div className="flex justify-center">
-          <Button
-            onClick={() => (window.location.href = "/upload")}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-6 text-lg rounded-full shadow-lg"
-          >
-            Check a Product
-            <ArrowRight className="ml-2 h-5 w-5" />
-          </Button>
-        </div>
-
-        <p className="text-sm text-slate-500 mt-4">
-          No login • 3 free checks • Powered by MongoDB Atlas + Voyage AI
-        </p>
-      </section>
-
-      {/* Veracity Categories */}
-      <section className="max-w-5xl mx-auto px-6 py-12 border-t border-slate-200">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-          {[
-            { icon: "⛰️", title: "Minerals", score: 88 },
-            { icon: "💊", title: "Pharma APIs", score: 92 },
-            { icon: "🌾", title: "Food & Agri", score: 94 },
-            { icon: "⚖️", title: "Legal / ESG", score: 90 },
-          ].map((c) => (
-            <Card key={c.title} className="bg-white shadow-sm hover:shadow-md transition-shadow">
-              <CardContent className="py-8">
-                <div className="text-4xl mb-3">{c.icon}</div>
-                <div className="font-medium text-slate-900">{c.title}</div>
-                <div className="text-sm text-slate-500 mt-1">Veracity Score: {c.score}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      {/* Mission Statement */}
-      <section className="max-w-4xl mx-auto px-6 py-20 text-center">
-        <h2 className="text-3xl md:text-4xl font-light mb-6">
-          Every Product Should Carry Its Proof of Truth.
-        </h2>
-        <p className="text-lg text-slate-600 leading-relaxed mb-8">
-          We help retailers, engineers, and ESG officers connect documentation to reality — 
-          so you never have to guess what’s inside your supply chain again.
-        </p>
-        <Button
-          variant="outline"
-          onClick={() => (window.location.href = "/suppliers")}
-          className="px-8 py-5 text-base border-slate-300 hover:bg-slate-50"
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => router.push("/instrument")}
+          className="text-sm uppercase tracking-widest px-6 py-3 border border-slate-500/50 rounded-full hover:bg-white hover:text-black transition-all"
         >
-          View Verified Suppliers
-        </Button>
-      </section>
+          Enter the Instrument →
+        </motion.button>
+      </motion.div>
 
-      {/* Why It Matters */}
-      <section className="bg-slate-50 border-t border-slate-200 py-20">
-        <div className="max-w-6xl mx-auto px-6 grid md:grid-cols-3 gap-8 text-left">
-          {[
-            {
-              icon: <ShieldCheck className="h-6 w-6 text-emerald-600" />,
-              title: "For General Counsel",
-              desc: "Avoid €40 M recalls by spotting non-compliant SKUs before they reach the shelves."
-            },
-            {
-              icon: <CheckCircle2 className="h-6 w-6 text-emerald-600" />,
-              title: "For Supply Chain Teams",
-              desc: "See which of your 100+ suppliers are exposing you to ESG, safety, or compliance risk."
-            },
-            {
-              icon: <CheckCircle2 className="h-6 w-6 text-emerald-600" />,
-              title: "For ESG Officers",
-              desc: "Automate traceability across battery passports, carbon, and human-rights reporting."
-            },
-          ].map((x) => (
-            <Card key={x.title} className="bg-white shadow-sm hover:shadow-md transition">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-3 mb-3">{x.icon}<h3 className="font-medium text-slate-900">{x.title}</h3></div>
-                <p className="text-sm text-slate-600 leading-relaxed">{x.desc}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      {/* Social Proof */}
-      <section className="max-w-6xl mx-auto px-6 py-16 text-center border-t border-slate-200">
-        <p className="text-sm text-slate-500 mb-6 uppercase tracking-wide">Trusted By</p>
-        <div className="flex items-center justify-center gap-12 text-slate-400 text-2xl opacity-70 font-light">
-          <span>Major EU Retailer</span>
-          <span>Supply Chain Co.</span>
-          <span>Battery Manufacturer</span>
-        </div>
-      </section>
-
-      {/* Final CTA */}
-      <section className="bg-gradient-to-r from-indigo-600 to-emerald-600 text-white text-center py-20">
-        <h2 className="text-4xl font-light mb-6">From Shelf to Source Starts Here.</h2>
-        <p className="text-lg opacity-90 mb-8">Join the teams turning chaos into traceability.</p>
-        <Button
-          size="lg"
-          className="bg-white text-emerald-700 hover:bg-slate-50 px-8 py-6 text-lg rounded-full"
-          onClick={() => (window.location.href = "/upload")}
-        >
-          Check Your First Document
-          <ArrowRight className="ml-2 h-5 w-5" />
-        </Button>
-      </section>
+      {/* Footer tagline */}
+      <motion.div
+        className="absolute bottom-6 text-xs text-slate-500 tracking-widest uppercase"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 3 }}
+      >
+        rareearthminerals.ai — a Veracity & Provenance Instrument
+      </motion.div>
     </div>
   );
 }
