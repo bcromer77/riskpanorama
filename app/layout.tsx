@@ -34,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 B
               </div>
               <h1 className="font-semibold text-emerald-700 tracking-tight text-lg">
-                RiskPanorama — Battery & Provenance Assistant
+                RareEarthMinerals.ai — Global Supply-Chain Compliance & Horizon Scanning
               </h1>
             </div>
 
@@ -46,6 +46,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/sku" className="hover:text-emerald-700 transition-colors">
                 SKU
               </a>
+<a href="/veracity" className="hover:text-emerald-700 transition-colors">
+  Veracity
+</a>
+
               <a href="/ask" className="hover:text-emerald-700 transition-colors">
                 Ask
               </a>
@@ -97,9 +101,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
 
         {/* ─── Page Content ─────────────────────────────── */}
-        <main className="p-6">{children}</main>
+        <div className="p-6">
+          <main>{children}</main>
+        </div>
       </body>
     </html>
   );
 }
-

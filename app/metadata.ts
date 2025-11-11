@@ -1,30 +1,24 @@
 // app/metadata.ts
 export const metadata = {
-  title: "RiskPanorama | AI-Powered ESG Verification & Supply Chain Intelligence",
+  title: "RareEarthMinerals.ai — Global Supply-Chain Risk & Compliance Intelligence",
   description:
-    "RiskPanorama unites MongoDB Vector Search, ESG verification, and agentic commerce to power real-time supplier transparency, Battery Passport compliance, and city infrastructure intelligence.",
-  keywords:
-    "RiskPanorama, BAPA, ESG verification, MongoDB Atlas, AI marketplace, supplier compliance, battery passport, ACP, agentic commerce, Stripe integration, city intelligence, sustainability data, vector search, LLM-ready datasets, AI infrastructure",
+    "Stay ahead of regulatory change. RareEarthMinerals.ai uses AI-powered vector search to detect risks in permits, filings, and supplier disclosures — from Mozambique graphite to Canada lithium.",
   openGraph: {
-    title: "RiskPanorama — ESG Intelligence & Supplier Verification",
+    title: "RareEarthMinerals.ai — Global supply-chain risk & compliance intelligence",
     description:
-      "AI-native ESG marketplace built on MongoDB Atlas + Vector Search. Verify suppliers, score materials, and transact securely via Agentic Commerce Protocol.",
-    url: "https://riskpanorama.vercel.app",
-    siteName: "RiskPanorama",
+      "AI-assisted evidence structuring for global supply-chain laws and battery passport compliance.",
+    url: "https://www.rareearthminerals.ai",
+    siteName: "RareEarthMinerals.ai",
     images: [
       {
-        url: "/og-image.jpg",
+        url: "/thumbnail.png",
         width: 1200,
         height: 630,
-        alt: "RiskPanorama ESG Dashboard",
+        alt: "RareEarthMinerals.ai preview",
       },
     ],
     locale: "en_US",
     type: "website",
-  },
-  robots: {
-    index: true,
-    follow: true,
   },
 };
 
