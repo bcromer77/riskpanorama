@@ -6,20 +6,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Home" },
-  { href: "/sku", label: "SKU" },
-  { href: "/ask", label: "Ask" },
-  { href: "/signals", label: "Signals" },
-  { href: "/cities", label: "Cities" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/supplier", label: "Suppliers" },
+  { href: "/intelligence", label: "Intelligence" },
+  { href: "/suppliers", label: "Suppliers" },
+  { href: "/retailers", label: "Retailers" },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
 
-  // Add subtle shadow when scrolled
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener("scroll", handleScroll);
@@ -36,7 +31,7 @@ export default function Navbar() {
     >
       <div className="px-6 py-3 flex items-center justify-between max-w-7xl mx-auto">
         <h1 className="font-semibold text-green-700 tracking-tight">
-          BAPA — Battery & Provenance Assistant
+          RareEarthMinerals.ai — Global Supply-Chain & Horizon Scanning
         </h1>
 
         <nav className="flex gap-6 text-sm text-slate-700">
@@ -61,3 +56,4 @@ export default function Navbar() {
     </header>
   );
 }
+
