@@ -1,51 +1,68 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
 import { MongoClient } from "mongodb";
 
-const uri = process.env.MONGODB_URI!;
-const client = new MongoClient(uri);
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+const MONGODB_URI = process.env.MONGODB_URI!;
+const DB_NAME = "rareearthminerals"; // ✅ your Atlas database
+const COLLECTION = "documents";      // ✅ your collection with vectors
+const INDEX_NAME = "vector_index";   // ✅ confirm in Atlas (Search & Vector tab)
 
-export async function POST(req: Request) {
-  const { query } = await req.json();
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+export async function POST(req: NextRequest) {
   try {
+    const { query } = await req.json();
+
+    if (!query) {
+      return NextResponse.json({ error: "Missing query text" }, { status: 400 });
+    }
+
+    // 🔗 Connect to MongoDB
+    const client = new MongoClient(MONGODB_URI);
     await client.connect();
-    const db = client.db("rareearthminerals");
+    const db = client.db(DB_NAME);
+    const col = db.collection(COLLECTION);
 
-    const embeddingResp = await fetch("https://api.voyageai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
-      },
-      body: JSON.stringify({ model: "voyage-large-2", input: query }),
+    // 🧮 Create vector embedding (match the model used for data)
+    const embed = await openai.embeddings.create({
+      model: "text-embedding-3-small", // ✅ same model used when seeding (1536 dims)
+      input: query,
     });
-    const embedding = (await embeddingResp.json()).data[0].embedding;
+    const vector = embed.data[0].embedding;
 
-    const results = await db.collection("documents").aggregate([
-      {
-        $vectorSearch: {
-          index: "vector_index",
-          path: "embedding",
-          queryVector: embedding,
-          numCandidates: 50,
-          limit: 5,
+    // 🧭 Vector Search via MongoDB Atlas
+    const results = await col
+      .aggregate([
+        {
+          $vectorSearch: {
+            index: INDEX_NAME,
+            path: "embedding",
+            queryVector: vector,
+            numCandidates: 100,
+            limit: 8,
+          },
         },
-      },
-      {
-        $project: {
-          text: 1,
-          metadata: 1,
-          score: { $meta: "vectorSearchScore" },
+        {
+          $project: {
+            _id: 0,
+            text: 1,
+            score: { $meta: "vectorSearchScore" },
+            metadata: 1,
+          },
         },
-      },
-    ]).toArray();
+      ])
+      .toArray();
+
+    await client.close();
 
     return NextResponse.json(results);
-  } catch (err) {
-    console.error("Vector query error:", err);
-    return NextResponse.json({ error: "Vector search failed" }, { status: 500 });
-  } finally {
-    await client.close();
+  } catch (err: any) {
+    console.error("❌ /api/intelligence/query error:", err);
+    return NextResponse.json(
+      { error: err.message || "Vector search failed" },
+      { status: 500 }
+    );
   }
 }
 

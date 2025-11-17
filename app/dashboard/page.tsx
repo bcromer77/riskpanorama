@@ -1,56 +1,48 @@
 "use client";
 
-import useSWR from "swr";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import { useEffect, useState } from "react";
 
 export default function DashboardPage() {
-  const { data, error } = useSWR("/api/risk/list", fetcher);
+  const [data, setData] = useState<any[]>([]);
 
-  if (error) return <div className="p-8 text-red-500">Error loading risks</div>;
-  if (!data) return <div className="p-8 text-slate-500">Loading...</div>;
-
-  const total = data.risks?.length || 0;
-  const highRisk = data.risks.filter((r: any) => r.risk_score > 0.7).length;
-  const compliant = data.risks.filter((r: any) => r.risk_score < 0.3).length;
+  useEffect(() => {
+    fetch("/api/risk/list")
+      .then((r) => r.json())
+      .then((d) => setData(d))
+      .catch(console.error);
+  }, []);
 
   return (
-    <main className="max-w-5xl mx-auto p-6">
-      <h1 className="text-2xl font-semibold mb-4">Supplier Risk Dashboard</h1>
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <Card><CardContent className="p-4 text-center"><p className="text-3xl font-bold">{total}</p><p className="text-sm text-muted-foreground">Total Reports</p></CardContent></Card>
-        <Card><CardContent className="p-4 text-center"><p className="text-3xl font-bold text-red-600">{highRisk}</p><p className="text-sm text-muted-foreground">High Risk</p></CardContent></Card>
-        <Card><CardContent className="p-4 text-center"><p className="text-3xl font-bold text-green-600">{compliant}</p><p className="text-sm text-muted-foreground">Compliant</p></CardContent></Card>
-      </div>
+    <div className="max-w-6xl mx-auto px-6 py-8">
+      <h1 className="text-2xl font-semibold text-emerald-700 mb-6">
+        Supplier Risk Dashboard
+      </h1>
 
-      <div className="space-y-3">
-        {data.risks.map((r: any, i: number) => (
-          <Card key={i} className="border shadow-sm">
-            <CardContent className="p-4 flex justify-between items-center">
-              <div>
-                <h2 className="font-semibold text-slate-900">{r.supplier}</h2>
-                <p className="text-sm text-slate-600">SKU: {r.sku}</p>
-                <p className="text-xs text-slate-500 mt-1">{new Date(r.timestamp).toLocaleString()}</p>
-              </div>
-              <Badge
-                className={`${
-                  r.risk_score > 0.7
-                    ? "bg-red-100 text-red-700"
-                    : r.risk_score > 0.4
-                    ? "bg-yellow-100 text-yellow-700"
-                    : "bg-green-100 text-green-700"
-                }`}
-              >
-                {(r.risk_score * 100).toFixed(0)}%
-              </Badge>
-            </CardContent>
-          </Card>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {data.map((r, i) => (
+          <div
+            key={i}
+            className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition"
+          >
+            <h2 className="font-semibold text-slate-800 mb-2">
+              {r.supplier || "Unknown Supplier"}
+            </h2>
+            <p className="text-sm text-slate-500 mb-2">
+              SKU: {r.sku || "N/A"}
+            </p>
+            <span
+              className={`text-xs px-3 py-1 rounded-full ${
+                r.risk_score > 70
+                  ? "bg-red-100 text-red-700"
+                  : "bg-green-100 text-green-700"
+              }`}
+            >
+              {r.risk_score}% Risk
+            </span>
+          </div>
         ))}
       </div>
-    </main>
+    </div>
   );
 }
 

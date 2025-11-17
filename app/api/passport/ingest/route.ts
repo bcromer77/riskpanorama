@@ -1,60 +1,76 @@
 // app/api/passport/ingest/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-import { getDb } from "@/lib/mongo";
-import { BatteryPassportDoc } from "@/lib/types";
+import { MongoClient } from "mongodb";
+import OpenAI from "openai";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const client = new MongoClient(process.env.MONGODB_URI!);
+
+export const runtime = "nodejs"; // ensures server context, not edge
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as Partial<BatteryPassportDoc>;
-
-    // minimal guard
-    if (!payload.battery_id || !payload.category) {
-      return NextResponse.json(
-        { error: "battery_id and category are required" },
-        { status: 400 }
-      );
+    const form = await req.formData();
+    const file = form.get("file") as File | null;
+    if (!file) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    const now = new Date().toISOString();
-    const db = await getDb();
-    const coll = db.collection<BatteryPassportDoc>("battery_passports");
+    const buf = Buffer.from(await file.arrayBuffer());
 
-    // what we will store
-    const doc: Partial<BatteryPassportDoc> = {
-      ...payload,
-      access: payload.access || { default_tier: "public" },
-      created_at: payload.created_at || now,
-      updated_at: now,
+    // --- Step 1: summarize via text model (no multimodal weirdness) ---
+    const textSummary = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Summarise this supplier document for a Battery Passport. Include material, origin, ESG or compliance points.",
+        },
+        {
+          role: "user",
+          content: `Filename: ${file.name}\n\nRaw text bytes (base64 length ${buf.length}). Summarise.`,
+        },
+      ],
+    });
+
+    const summary =
+      textSummary.choices[0]?.message?.content ??
+      "No summary generated.";
+
+    // --- Step 2: embed summary ---
+    const embedding = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: summary,
+    });
+
+    // --- Step 3: store in Mongo ---
+    await client.connect();
+    const db = client.db("rareearthminerals");
+    const col = db.collection("battery_passports");
+
+    const doc = {
+      supplier: file.name.split("_")[0] || "Unknown",
+      filename: file.name,
+      summary,
+      embedding: embedding.data[0].embedding,
+      createdAt: new Date(),
     };
 
-    // idempotent on battery_id
-    const existing = await coll.findOne({ battery_id: payload.battery_id });
-
-    let _id: ObjectId;
-    if (existing?._id) {
-      await coll.updateOne({ _id: existing._id }, { $set: doc });
-      _id = existing._id as ObjectId;
-    } else {
-      const ins = await coll.insertOne(doc as any);
-      _id = ins.insertedId as ObjectId;
-    }
-
-    const base =
-      process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3001";
-    const publicUrl = `${base}/passport/${_id.toString()}`;
+    const result = await col.insertOne(doc);
 
     return NextResponse.json({
-      id: _id.toString(),
-      url: publicUrl,
-      message: "Passport ingested",
+      message: "✅ Passport created",
+      id: result.insertedId.toString(),
+      preview: summary.slice(0, 180) + "...",
     });
-  } catch (err) {
-    console.error("ingest passport error:", err);
-    return NextResponse.json(
-      { error: "Failed to ingest passport" },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    console.error("❌ ingest error", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  } finally {
+    try {
+      await client.close();
+    } catch {}
   }
 }
 
