@@ -1,17 +1,32 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "next.config.ts", "use": "@vercel/next" }
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/demo"
+    },
+    {
+      "src": "/instrument/(.*)",
+      "dest": "/instrument/$1",
+      "headers": {
+        "Cache-Control": "no-store"
+      }
+    },
+    {
+      "src": "/demo",
+      "dest": "/demo"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
   ],
   "env": {
-    "MONGODB_URI": "@mongodb_uri",
-    "VOYAGE_API_KEY": "@voyage_api_key",
-    "OPENAI_API_KEY": "@openai_api_key"
-  },
-  "ignoreCommand": "echo 'Using .vercelignore for cleanup'",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/" }
-  ]
+    "OPENAI_API_KEY": "OPENAI_API_KEY",
+    "MONGODB_URI": "MONGODB_URI",
+    "VOYAGE_API_KEY": "VOYAGE_API_KEY",
+    "NEXT_PUBLIC_SUPABASE_URL": "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+  }
 }
 
