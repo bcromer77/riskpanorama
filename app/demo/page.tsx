@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 "use client";
 
 import { useState } from "react";
@@ -15,17 +16,15 @@ export default function DemoPage() {
     if (!file) return;
     setFileName(file.name);
     setStage("processing");
-    setTimeout(() => setStage("done"), 3000); // fake comprehension delay
+    setTimeout(() => setStage("done"), 3000);
   };
 
   return (
     <div className="relative min-h-screen bg-gradient-to-b from-black via-gray-900 to-emerald-950 text-white overflow-hidden flex flex-col items-center justify-center">
-      {/* Watermark Overlay */}
       <div className="absolute inset-0 pointer-events-none opacity-5 select-none flex items-center justify-center text-4xl font-semibold tracking-widest">
         RAREEARTHMINERALS.AI — Proof. Clarity. Comprehension.
       </div>
 
-      {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -40,7 +39,6 @@ export default function DemoPage() {
         </p>
       </motion.div>
 
-      {/* Upload / Proof Engine Section */}
       <motion.div
         className="relative bg-white/10 border border-white/20 rounded-3xl shadow-2xl p-10 w-[90%] md:w-[650px] text-center backdrop-blur-md"
         initial={{ opacity: 0, y: 20 }}
@@ -103,7 +101,6 @@ export default function DemoPage() {
               This report has been independently verified for authenticity and provenance.
             </p>
 
-            {/* Proof Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
               {[
                 {
@@ -132,7 +129,6 @@ export default function DemoPage() {
               ))}
             </div>
 
-            {/* QR Code */}
             <div className="flex flex-col items-center mt-8">
               <div className="bg-white p-4 rounded-2xl shadow-lg">
                 <QRCodeSVG value={proofUrl} size={120} includeMargin />
@@ -146,7 +142,6 @@ export default function DemoPage() {
         )}
       </motion.div>
 
-      {/* Footer */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.8 }}
