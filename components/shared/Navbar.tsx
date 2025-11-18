@@ -1,3 +1,4 @@
+// components/shared/Navbar.tsx
 "use client";
 
 import Link from "next/link";
@@ -9,9 +10,9 @@ export default function Navbar() {
   const navLinks = [
     { href: "/instrument", label: "Upload & Query" },
     { href: "/", label: "Intelligence" },
-    { href: "/suppliers", label: "Suppliers" },
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/sku", label: "SKU" },
+    { href: "/supply-chain", label: "Supply Chain" },
+    { href: "/vault", label: "Vault" },
+    { href: "/search", label: "Search" },
   ];
 
   return (
@@ -47,4 +48,3 @@ export default function Navbar() {
     </header>
   );
 }
-

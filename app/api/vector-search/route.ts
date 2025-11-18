@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
-import { getMongoClient } from "@/lib/mongo";
+import { getDb } from "@/lib/mongo";
 import { embedText } from "@/lib/vector";
 
 export async function POST(req: Request) {
   try {
     const { query } = await req.json();
-    const db = await getMongoClient();
+    if (!query) {
+      return NextResponse.json({ error: "Missing query" }, { status: 400 });
+    }
+
+    // ✅ Connect to MongoDB
+    const db = await getDb();
     const collection = db.collection("esg_signals");
 
-    // Embed the search query using Voyage Context-3
+    // ✅ Create embedding (Voyage/OpenAI compatible)
     const embedding = await embedText(query);
 
-    // Vector Search in MongoDB
+    // ✅ Vector Search pipeline
     const pipeline = [
       {
         $vectorSearch: {
-          index: "signals_vector",
+          index: "signals_vector", // name of your MongoDB Atlas vector index
           path: "embedding",
           queryVector: embedding,
           numCandidates: 100,
@@ -24,6 +29,7 @@ export async function POST(req: Request) {
       },
       {
         $project: {
+          _id: 0,
           title: 1,
           country: 1,
           mineral: 1,
@@ -36,11 +42,8 @@ export async function POST(req: Request) {
     const results = await collection.aggregate(pipeline).toArray();
     return NextResponse.json({ hits: results });
   } catch (error: any) {
-    console.error(error);
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    );
+    console.error("❌ /api/vector-search error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 

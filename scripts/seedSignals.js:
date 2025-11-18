@@ -1,0 +1,55 @@
+import { MongoClient } from "mongodb";
+import OpenAI from "openai";
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+
+const client = new MongoClient(process.env.MONGODB_URI);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const sampleSignals = [
+  {
+    title: "Mozambique graphite exports delayed by environmental audit",
+    summary: "Graphite shipments from Balama port halted pending new ESG review.",
+    source: "Reuters",
+    date: "2025-10-10",
+    region: "Mozambique",
+  },
+  {
+    title: "China rare-earth quota reduced for 2025",
+    summary: "Ministry of Commerce cuts export quota by 15%, impacting EU battery supply.",
+    source: "SCMP",
+    date: "2025-10-12",
+    region: "China",
+  },
+  {
+    title: "EU enforces ESG screening on graphite imports",
+    summary: "New directive adds traceability requirement for natural graphite sourcing.",
+    source: "Politico",
+    date: "2025-11-05",
+    region: "EU",
+  },
+];
+
+const run = async () => {
+  await client.connect();
+  const db = client.db("rareearthminerals");
+  const col = db.collection("signals");
+
+  for (const sig of sampleSignals) {
+    const emb = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: `${sig.title}. ${sig.summary}`,
+    });
+    await col.insertOne({
+      ...sig,
+      embedding: emb.data[0].embedding,
+    });
+    console.log("Inserted:", sig.title);
+  }
+
+  console.log("✅ Seed complete.");
+  await client.close();
+};
+
+run();
+

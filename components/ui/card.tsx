@@ -1,18 +1,36 @@
 import * as React from "react";
+import { cn } from "@/lib/utils";
 
-export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-slate-200 bg-white ${className}`}>{children}</div>;
+export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-slate-200 bg-white shadow-sm",
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
-export function CardHeader({ children }: { children: React.ReactNode }) {
-  return <div className="p-4 border-b border-slate-100">{children}</div>;
+export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("p-4 pb-2", className)} {...props} />
+  );
 }
 
-export function CardTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-lg font-semibold text-slate-800">{children}</h2>;
+export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+  return (
+    <h3
+      className={cn("text-lg font-semibold leading-none tracking-tight", className)}
+      {...props}
+    />
+  );
 }
 
-export function CardContent({ children }: { children: React.ReactNode }) {
-  return <div className="p-4">{children}</div>;
+export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("p-4 pt-0", className)} {...props} />
+  );
 }
 

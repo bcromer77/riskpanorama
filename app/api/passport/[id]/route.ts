@@ -1,57 +1,58 @@
-// app/api/passport/[id]/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-import { getDb } from "@/lib/mongo";
-import { BatteryPassportDoc, AccessTier } from "@/lib/types";
+kimport { NextResponse } from "next/server";
+import { MongoClient, ObjectId } from "mongodb";
 
-function filterByRole(doc: BatteryPassportDoc, role: AccessTier) {
-  const clone: any = JSON.parse(JSON.stringify(doc));
-  delete clone._id;
-
-  // always safe for public
-  const makePublic = () => {
-    if (clone.performance?.dynamic) {
-      delete clone.performance.dynamic;
-    }
-    return clone;
-  };
-
-  if (role === "public") return makePublic();
-  if (role === "legitimate_interest") return clone;
-  if (role === "authority" || role === "commission") return clone;
-
-  return makePublic();
-}
+const MONGODB_URI = process.env.MONGODB_URI!;
+const DB_NAME = "rareearthminerals";
 
 export async function GET(
-  req: NextRequest,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = await getDb();
-    const coll = db.collection<BatteryPassportDoc>("battery_passports");
+    const id = params.id;
 
-    const doc = await coll.findOne({ _id: new ObjectId(params.id) });
+    const client = new MongoClient(MONGODB_URI);
+    await client.connect();
+    const db = client.db(DB_NAME);
+
+    const doc = await db
+      .collection("documents")
+      .findOne({ _id: new ObjectId(id) });
+
+    client.close();
+
     if (!doc) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Passport not found" },
+        { status: 404 }
+      );
     }
 
-    const url = new URL(req.url);
-    const roleParam = (url.searchParams.get("role") || "").trim() as AccessTier;
-    const roleHeader = (req.headers.get("x-passport-role") || "").trim() as AccessTier;
-    const role: AccessTier = roleParam || roleHeader || "public";
+    // 🔒 `role=public` strips internal notes
+    const { searchParams } = new URL(req.url);
+    const role = searchParams.get("role") || "public";
 
-    const filtered = filterByRole(doc, role);
+    const publicPassport = {
+      passport_id: id,
+      filename: doc.filename,
+      uploadedAt: doc.uploadedAt,
+      preview: doc.textPreview,
+      passport: doc.passport || {},
+      insights:
+        role === "public"
+          ? undefined // hide operator insights publicly
+          : doc.insights || [],
+      fpic:
+        role === "public"
+          ? doc.fpic || {} // FPIC is allowed publicly
+          : doc.fpic || {},
+    };
 
-    return NextResponse.json({
-      id: params.id,
-      role,
-      passport: filtered,
-    });
-  } catch (err) {
-    console.error("get passport error:", err);
+    return NextResponse.json(publicPassport);
+  } catch (err: any) {
+    console.error("Passport API error:", err);
     return NextResponse.json(
-      { error: "Failed to fetch passport" },
+      { error: err.message || "Server error" },
       { status: 500 }
     );
   }

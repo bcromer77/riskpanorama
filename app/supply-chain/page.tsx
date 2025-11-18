@@ -1,22 +1,22 @@
-// app/suppliers/page.tsx
+// app/supply-chain/page.tsx
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from "next/navigation";
 import {
-  Search,
-  Zap,
   AlertCircle,
   Radio,
   Globe,
   Scale,
   X,
   AlertOctagon,
+  ChevronRight,
+  TrendingUp,
+  MapPin,
 } from "lucide-react";
 import WorldMap, { MapMarker } from "@/components/world/WorldMap";
 
@@ -45,7 +45,7 @@ type GlobalSignal = {
   severity: "low" | "medium" | "high";
   description: string;
   source?: string;
-  forecastHorizon?: string; // e.g. "2026–2030"
+  forecastHorizon?: string;
 };
 
 type IndigenousBroadcast = {
@@ -57,20 +57,12 @@ type IndigenousBroadcast = {
   timestamp: string;
 };
 
-type SearchResult = {
-  id: string;
-  title: string;
-  snippet: string;
-  source: string;
-  score: number;
-};
-
 // -------------------------------
-// Enhanced Severity Badge
+// Enhanced Severity Badge with animation
 // -------------------------------
 const severityBadge = (level: "low" | "medium" | "high") => {
   const map: Record<typeof level, string> = {
-    high: "bg-rose-100 text-rose-800 border-rose-300",
+    high: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse",
     medium: "bg-amber-100 text-amber-800 border-amber-300",
     low: "bg-emerald-100 text-emerald-800 border-emerald-300",
   };
@@ -87,7 +79,7 @@ const severityBadge = (level: "low" | "medium" | "high") => {
 };
 
 const horizonBadge = () => (
-  <Badge className="bg-purple-100 text-purple-800 border-purple-300 text-[10px] border font-medium flex items-center gap-1">
+  <Badge className="bg-indigo-100 text-indigo-800 border-indigo-300 text-[10px] border font-medium flex items-center gap-1">
     <AlertOctagon className="w-3 h-3" />
     Horizon Risk
   </Badge>
@@ -144,21 +136,84 @@ function intensityFromScore(score: number): "low" | "medium" | "high" {
 }
 
 // -------------------------------
+// Corridor data for breakdown card
+// -------------------------------
+const CORRIDOR_DATA: Record<
+  string,
+  {
+    name: string;
+    routes: string[];
+    threats: string[];
+    fpicRisk: "low" | "medium" | "high";
+  }
+> = {
+  CD: {
+    name: "DRC Cobalt Corridor",
+    routes: ["Kolwezi → Zambia → Durban", "Kolwezi → Tanzania → Dar es Salaam"],
+    threats: ["M23 rebel control", "Road blockades", "Export license delays"],
+    fpicRisk: "high",
+  },
+  CN: {
+    name: "China REE Export Routes",
+    routes: ["Inner Mongolia → Tianjin Port", "Sichuan → Shanghai Port"],
+    threats: ["Export license regime", "Geopolitical retaliation", "Quota restrictions"],
+    fpicRisk: "low",
+  },
+  IN: {
+    name: "India Graphite Belt",
+    routes: ["Telangana → Chennai Port", "Odisha → Visakhapatnam"],
+    threats: ["Election-driven mine shutdowns", "State-level policy shifts"],
+    fpicRisk: "medium",
+  },
+  CA: {
+    name: "Yukon Critical Minerals Corridor",
+    routes: ["Yukon → Alaska refineries", "Yukon → Vancouver Port"],
+    threats: ["First Nations injunctions", "FPIC consultation failures", "Court delays"],
+    fpicRisk: "high",
+  },
+  MX: {
+    name: "Mexico Lithium Triangle",
+    routes: ["Sonora → US border", "Baja California → Pacific ports"],
+    threats: ["Nationalization", "Concession cancellations", "Policy reversals"],
+    fpicRisk: "medium",
+  },
+  BR: {
+    name: "Amazon Grid Expansion",
+    routes: ["Acre → Bolivia border", "Rondônia → Santos Port"],
+    threats: [
+      "Indigenous veto threats",
+      "Federal prosecutor challenges",
+      "Uncontacted territories",
+    ],
+    fpicRisk: "high",
+  },
+  MM: {
+    name: "Myanmar REE Feedstock",
+    routes: ["Kachin State → Yunnan, China"],
+    threats: ["Civil war", "Insurgent mine control", "Supply disruption"],
+    fpicRisk: "high",
+  },
+  NA: {
+    name: "Namibia Uranium/Lithium Belt",
+    routes: ["Erongo → Walvis Bay Port"],
+    threats: ["Indigenous veto bill (2026)", "Traditional authority challenges"],
+    fpicRisk: "medium",
+  },
+};
+
+// -------------------------------
 // Main Component
 // -------------------------------
-export default function SuppliersPage() {
+export default function SupplyChainPage() {
   const router = useRouter();
-  const resultsRef = useRef<HTMLDivElement>(null);
 
   const [passports, setPassports] = useState<SupplierPassport[]>([]);
   const [signals, setSignals] = useState<GlobalSignal[]>([]);
   const [broadcasts, setBroadcasts] = useState<IndigenousBroadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-
-  const [query, setQuery] = useState("China rare earth export curbs");
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [fpicSidebarOpen, setFpicSidebarOpen] = useState(false);
+  const [corridorCardOpen, setCorridorCardOpen] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -172,8 +227,6 @@ export default function SuppliersPage() {
         setLoading(false);
       }
 
-      // CHAMPIONS LEAGUE + HORIZON SCANNING — Nov 2025 Intel
-      // Now includes Mexico, Canada, Brazil, M23 corridor
       setSignals([
         {
           title: "China REE Export License Regime Goes Live Dec 1",
@@ -327,17 +380,11 @@ export default function SuppliersPage() {
           timestamp: "1 day ago",
         },
       ]);
-
-      runSearch();
     }
     load();
   }, []);
 
-  // -------------------------------
-  // World Map Markers — wired to hybrid WorldMap
-  // -------------------------------
   const mapMarkers: MapMarker[] = [
-    // Signals → political & horizon layer
     ...signals.flatMap((s, idx) => {
       const code = countryCodeFromName(s.country);
       if (!code) return [];
@@ -346,14 +393,13 @@ export default function SuppliersPage() {
           id: `signal-${idx}`,
           label: s.title,
           countryCode: code,
-          type: "signal",
+          type: "signal" as const,
           intensity: s.severity,
-          riskCategory: "political",
-        } as MapMarker,
+          riskCategory: "political" as const,
+        },
       ];
     }),
 
-    // Passports → supplier layer
     ...passports.flatMap((p) => {
       const code = countryCodeFromName(p.country);
       if (!code) return [];
@@ -363,14 +409,13 @@ export default function SuppliersPage() {
           id: `supplier-${p.id}`,
           label: p.supplier,
           countryCode: code,
-          type: "supplier",
+          type: "supplier" as const,
           intensity: intensityFromScore(score),
-          riskCategory: "environmental",
-        } as MapMarker,
+          riskCategory: "environmental" as const,
+        },
       ];
     }),
 
-    // Indigenous broadcasts → indigenous FPIC layer
     ...broadcasts.flatMap((b, idx) => {
       const code = countryCodeFromName(b.region);
       if (!code) return [];
@@ -397,69 +442,16 @@ export default function SuppliersPage() {
           id: `broadcast-${idx}`,
           label: b.station,
           countryCode: code,
-          type: "indigenous",
+          type: "indigenous" as const,
           intensity: b.severity,
           peopleName,
           territoryName: b.region,
-          riskCategory: "fpic",
+          riskCategory: "fpic" as const,
           forecastHorizonYears: 3,
-        } as MapMarker,
+        },
       ];
     }),
   ];
-
-  // -------------------------------
-  // Search & Filtering
-  // -------------------------------
-  const runSearch = () => {
-    setSearching(true);
-    setTimeout(() => {
-      setResults([
-        {
-          id: "1",
-          title: "China REE Export Curbs — Full Impact Report",
-          snippet: "Dec 1 license regime could halt 6.2M EV production lines...",
-          source: "X • Reuters",
-          score: 0.98,
-        },
-        {
-          id: "2",
-          title: "M23 Corridor Disruption — DRC Cobalt Route Analysis",
-          snippet: "Kolwezi–Zambia highway cut. Battery passport routes at risk of invalidation...",
-          source: "Reuters • X",
-          score: 0.96,
-        },
-        {
-          id: "3",
-          title: "Telangana Political Risk — Mine Shutdown Manifesto",
-          snippet: "Opposition party to phase out all mining if elected 2028...",
-          source: "X • The Hindu",
-          score: 0.95,
-        },
-        {
-          id: "4",
-          title: "Yukon FPIC Injunction — Kaska Dena Legal Challenge",
-          snippet: "Court filing halts critical minerals road. Nickel/cobalt route to Alaska at risk...",
-          source: "CBC • Indigenous radio",
-          score: 0.94,
-        },
-        {
-          id: "5",
-          title: "Namibia Indigenous Veto Bill Draft",
-          snippet: "Traditional authorities to get binding veto on new licenses...",
-          source: "Reuters Africa",
-          score: 0.92,
-        },
-      ]);
-      setSearching(false);
-      resultsRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 800);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    runSearch();
-  };
 
   const filteredSignals = selectedCountry
     ? signals.filter((s) => countryCodeFromName(s.country) === selectedCountry)
@@ -469,22 +461,25 @@ export default function SuppliersPage() {
     ? broadcasts.filter((b) => countryCodeFromName(b.region) === selectedCountry)
     : broadcasts;
 
-  // -------------------------------
-  // UI
-  // -------------------------------
+  const handleCountryClick = (code: string) => {
+    setSelectedCountry((prev) => (prev === code ? null : code));
+    setFpicSidebarOpen(true);
+    setCorridorCardOpen(true);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* HERO + SEARCH */}
-      <header className="sticky top-0 z-50 bg-gradient-to-br from-emerald-50 via-white to-purple-50 border-b border-emerald-100 shadow-lg">
+    <div className="min-h-screen bg-slate-50 relative">
+      {/* HERO */}
+      <header className="bg-gradient-to-br from-slate-50 via-white to-emerald-50 border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold text-slate-900">
-                Supplier Intelligence Workspace
+                Global Supply Chain Map
               </h1>
               <p className="text-lg text-slate-700 mt-2 max-w-3xl">
-                Emerging FPIC disputes, regulatory horizon shifts, and geopolitical choke points —
-                all mapped to your cathode supply chain so battery passports don't go dark overnight.
+                FPIC disputes, geopolitical choke points, and regulatory horizon risks — mapped to
+                your cathode supply chain in real time.
               </p>
             </div>
             <div className="flex items-center gap-3 text-emerald-600 font-bold">
@@ -495,77 +490,12 @@ export default function SuppliersPage() {
               LIVE • HORIZON ACTIVE
             </div>
           </div>
-
-          <Card className="shadow-2xl border-purple-200 bg-white/95 backdrop-blur">
-            <CardHeader className="pb-4">
-              <div className="flex items-center gap-2 text-purple-700">
-                <Zap className="w-6 h-6" />
-                <h2 className="text-xl font-bold">Ask the Supply Chain Risk Engine</h2>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="flex gap-3">
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="e.g. Could new FPIC or export laws invalidate our DRC → Sweden battery route?"
-                  className="h-12 text-base"
-                />
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={searching}
-                  className="px-8 bg-purple-600 hover:bg-purple-700"
-                >
-                  {searching ? "Scanning…" : (
-                    <>
-                      Search <Search className="ml-2 w-4 h-4" />
-                    </>
-                  )}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-
-          {results.length > 0 && (
-            <div className="mt-6" ref={resultsRef}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <AlertOctagon className="w-5 h-5 text-purple-600" /> Risk Intelligence Results
-                </h3>
-                <Button variant="ghost" size="sm" onClick={() => setResults([])}>
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                {results.map((r) => (
-                  <Card
-                    key={r.id}
-                    className="border-purple-200 hover:border-purple-400 transition"
-                  >
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-start">
-                        <CardTitle className="text-base">{r.title}</CardTitle>
-                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-xs">
-                          Match {(r.score * 100).toFixed(0)}%
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-slate-500">{r.source}</p>
-                    </CardHeader>
-                    <CardContent className="text-sm text-slate-700">
-                      {r.snippet}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-12 space-y-20">
         {/* MAP */}
-        <section>
+        <section className="relative">
           <h2 className="text-2xl font-bold mb-4">
             Global FPIC, Choke Points & Regulatory Horizon
           </h2>
@@ -575,43 +505,96 @@ export default function SuppliersPage() {
             Click a hotspot to see the signals and indigenous broadcasts underneath.
           </p>
           {selectedCountry && (
-            <div className="mb-4 flex items-center gap-2">
-              <Badge className="bg-purple-100 text-purple-800 border-purple-300">
+            <div className="mb-4 flex items-center gap-2 animate-fade-in">
+              <Badge className="bg-slate-100 text-slate-800 border-slate-300">
                 Filtered: {selectedCountry}
               </Badge>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSelectedCountry(null)}
+                onClick={() => {
+                  setSelectedCountry(null);
+                  setFpicSidebarOpen(false);
+                  setCorridorCardOpen(false);
+                }}
               >
                 Clear filter
               </Button>
             </div>
           )}
-          <div className="rounded-2xl border-2 border-purple-200 bg-slate-950 p-4 shadow-2xl">
+          <div className="rounded-2xl border-2 border-slate-200 bg-slate-950 p-4 shadow-2xl backdrop-blur-xl bg-slate-950/95">
             <div className="flex justify-between text-xs text-slate-300 mb-3">
               <span className="font-bold uppercase tracking-wider">
                 FPIC • Political • Horizon • Indigenous
               </span>
               <div className="flex gap-4">
                 <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" /> Supplier
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Supplier
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" /> Signal
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-sky-400" /> Indigenous
+                  <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" /> Indigenous
                 </span>
               </div>
             </div>
-            <WorldMap
-              markers={mapMarkers}
-              onSelectCountry={(code) =>
-                setSelectedCountry((prev) => (prev === code ? null : code))
-              }
-            />
+            <WorldMap markers={mapMarkers} onSelectCountry={handleCountryClick} />
           </div>
+
+          {/* Corridor Breakdown Card */}
+          {corridorCardOpen && selectedCountry && CORRIDOR_DATA[selectedCountry] && (
+            <Card className="absolute top-24 right-0 w-96 shadow-2xl border-slate-300 animate-slide-in-right z-10 backdrop-blur-xl bg-white/95">
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <MapPin className="w-4 h-4 text-rose-600" />
+                      {CORRIDOR_DATA[selectedCountry].name}
+                    </CardTitle>
+                    <p className="text-xs text-slate-500 mt-1">Corridor Breakdown</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCorridorCardOpen(false)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-slate-700 mb-1">Key Routes</p>
+                  <ul className="text-xs text-slate-600 space-y-1">
+                    {CORRIDOR_DATA[selectedCountry].routes.map((r, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <ChevronRight className="w-3 h-3 mt-0.5 text-emerald-600" />
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-700 mb-1">Active Threats</p>
+                  <ul className="text-xs text-slate-600 space-y-1">
+                    {CORRIDOR_DATA[selectedCountry].threats.map((t, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <AlertCircle className="w-3 h-3 mt-0.5 text-rose-600" />
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="pt-2 border-t">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-slate-700">FPIC Risk</span>
+                    {severityBadge(CORRIDOR_DATA[selectedCountry].fpicRisk)}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         {/* SIGNALS */}
@@ -625,13 +608,16 @@ export default function SuppliersPage() {
             )}
           </h2>
           <p className="text-sm text-slate-600 mb-6 max-w-3xl">
-            Regulatory horizon, coups, and corridor conflicts — scored for how likely they are
-            to disrupt flows, trigger FPIC challenges, or force a rewrite of your battery
-            passports and long‑term offtake contracts.
+            Regulatory horizon, coups, and corridor conflicts — scored for how likely they are to
+            disrupt flows, trigger FPIC challenges, or force a rewrite of your battery passports
+            and long‑term offtake contracts.
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             {filteredSignals.map((s, i) => (
-              <Card key={i} className="hover:border-purple-300 transition">
+              <Card
+                key={i}
+                className="hover:border-slate-400 hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+              >
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <div>
@@ -640,14 +626,12 @@ export default function SuppliersPage() {
                         {s.category} • {s.country}
                       </p>
                       {s.forecastHorizon && (
-                        <p className="text-xs text-purple-600 font-medium mt-1">
+                        <p className="text-xs text-indigo-600 font-medium mt-1">
                           Horizon: {s.forecastHorizon}
                         </p>
                       )}
                       {s.source && (
-                        <p className="text-xs text-slate-400 mt-1">
-                          Source: {s.source}
-                        </p>
+                        <p className="text-xs text-slate-400 mt-1">Source: {s.source}</p>
                       )}
                     </div>
                     <div className="flex flex-col items-end gap-1">
@@ -656,9 +640,7 @@ export default function SuppliersPage() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="text-sm text-slate-700">
-                  {s.description}
-                </CardContent>
+                <CardContent className="text-sm text-slate-700">{s.description}</CardContent>
               </Card>
             ))}
           </div>
@@ -675,32 +657,34 @@ export default function SuppliersPage() {
             )}
           </h2>
           <p className="text-sm text-slate-600 mb-6 max-w-3xl">
-            Live broadcasts from indigenous communities along your supply routes. Early warnings
-            of FPIC disputes, land conflicts, and consultation breakdowns that could invalidate
-            battery passport compliance.
+            Live broadcasts from indigenous communities along your supply routes. Early warnings of
+            FPIC disputes, land conflicts, and consultation breakdowns that could invalidate battery
+            passport compliance.
           </p>
           <div className="grid gap-4 md:grid-cols-2">
             {filteredBroadcasts.map((b, idx) => (
-              <Card key={idx} className="hover:border-sky-300 transition">
+              <Card
+                key={idx}
+                className="hover:border-sky-400 hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+              >
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <div>
-                      <CardTitle className="text-base">{b.station}</CardTitle>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Radio className="w-4 h-4 text-sky-600" />
+                        {b.station}
+                      </CardTitle>
                       <p className="text-xs text-slate-500">
                         {b.region} • {b.language}
                       </p>
                     </div>
                     <div className="text-right">
                       {severityBadge(b.severity)}
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        {b.timestamp}
-                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1">{b.timestamp}</p>
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="text-sm text-slate-700">
-                  {b.excerpt}
-                </CardContent>
+                <CardContent className="text-sm text-slate-700">{b.excerpt}</CardContent>
               </Card>
             ))}
           </div>
@@ -708,9 +692,7 @@ export default function SuppliersPage() {
 
         {/* INTELLIGENCE MODULE GRID */}
         <section>
-          <h2 className="text-2xl font-bold text-slate-900 mb-8">
-            Intelligence Modules
-          </h2>
+          <h2 className="text-2xl font-bold text-slate-900 mb-8">Intelligence Modules</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
@@ -749,10 +731,12 @@ export default function SuppliersPage() {
             ].map((m) => (
               <Card
                 key={m.title}
-                className="relative cursor-pointer hover:-translate-y-1 hover:shadow-xl transition"
+                className="relative cursor-pointer hover:-translate-y-2 hover:shadow-2xl transition-all duration-300"
                 onClick={() => router.push(m.href)}
               >
-                <div className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${m.gradient}`} />
+                <div
+                  className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${m.gradient}`}
+                />
                 <CardHeader>
                   <m.icon className="w-8 h-8 text-slate-700 mb-3" />
                   <CardTitle className="text-lg">{m.title}</CardTitle>
@@ -775,10 +759,11 @@ export default function SuppliersPage() {
         {/* PASSPORTS + BENCHMARKING MATRIX */}
         <section>
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-slate-900">
-              Approved Supplier Passports
-            </h2>
-            <Button onClick={() => router.push("/instrument")}>
+            <h2 className="text-2xl font-bold text-slate-900">Approved Supplier Passports</h2>
+            <Button
+              onClick={() => router.push("/instrument")}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
               Go to Instrument →
             </Button>
           </div>
@@ -796,7 +781,10 @@ export default function SuppliersPage() {
           ) : passports.length === 0 ? (
             <Card className="p-12 text-center bg-slate-50">
               <p className="text-lg text-slate-700 mb-4">No passports yet</p>
-              <Button onClick={() => router.push("/instrument")}>
+              <Button
+                onClick={() => router.push("/instrument")}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
                 Create First Passport
               </Button>
             </Card>
@@ -804,7 +792,10 @@ export default function SuppliersPage() {
             <>
               <div className="space-y-4 mb-12">
                 {passports.map((p) => (
-                  <Card key={p.id} className="hover:border-emerald-400 transition">
+                  <Card
+                    key={p.id}
+                    className="hover:border-emerald-400 hover:shadow-lg transition-all duration-300"
+                  >
                     <CardHeader>
                       <div className="flex justify-between items-center">
                         <div>
@@ -814,6 +805,7 @@ export default function SuppliersPage() {
                         <Button
                           size="sm"
                           onClick={() => router.push(`/passport/${p.id}`)}
+                          className="bg-emerald-600 hover:bg-emerald-700"
                         >
                           View Passport
                         </Button>
@@ -835,7 +827,7 @@ export default function SuppliersPage() {
               </div>
 
               {/* Benchmark Table */}
-              <div className="rounded-xl border overflow-hidden">
+              <div className="rounded-xl border overflow-hidden shadow-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
@@ -860,22 +852,23 @@ export default function SuppliersPage() {
                           : "text-rose-700";
 
                       return (
-                        <tr key={p.id} className={i % 2 ? "bg-slate-50" : "bg-white"}>
-                          <td className="px-6 py-4 font-medium text-slate-800">
-                            {p.supplier}
-                          </td>
+                        <tr
+                          key={p.id}
+                          className={`${
+                            i % 2 ? "bg-slate-50" : "bg-white"
+                          } hover:bg-slate-100 transition`}
+                        >
+                          <td className="px-6 py-4 font-medium text-slate-800">{p.supplier}</td>
                           <td className="px-6 py-4 text-slate-600">{p.country}</td>
                           <td className="px-6 py-4">{(p.fpicScore * 100).toFixed(0)}%</td>
                           <td className="px-6 py-4">{(p.esgScore * 100).toFixed(0)}%</td>
-                          <td className="px-6 py-4">
-                            {(p.politicalScore * 100).toFixed(0)}%
-                          </td>
+                          <td className="px-6 py-4">{(p.politicalScore * 100).toFixed(0)}%</td>
                           <td className="px-6 py-4 font-semibold">
                             {(score * 100).toFixed(0)}%
                           </td>
                           <td className={`px-6 py-4 font-medium ${color}`}>
                             <span className="flex items-center gap-2">
-                              <span className="h-2 w-2 rounded-full bg-current" />
+                              <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
                               {label}
                             </span>
                           </td>
@@ -889,6 +882,65 @@ export default function SuppliersPage() {
           )}
         </section>
       </main>
+
+      {/* FPIC Sidebar */}
+      {fpicSidebarOpen && selectedCountry && (
+        <div className="fixed top-0 right-0 h-full w-96 bg-white/95 backdrop-blur-xl shadow-2xl border-l border-slate-200 z-50 animate-slide-in-right overflow-y-auto">
+          <div className="p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-rose-600" />
+                FPIC Risk Panel
+              </h3>
+              <Button variant="ghost" size="sm" onClick={() => setFpicSidebarOpen(false)}>
+                <ChevronRight className="w-5 h-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <p className="text-sm font-semibold text-slate-700 mb-2">Selected Region</p>
+                <Badge className="bg-slate-100 text-slate-800 border-slate-300">
+                  {selectedCountry}
+                </Badge>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-slate-700 mb-3">Active Signals</p>
+                <div className="space-y-2">
+                  {filteredSignals.slice(0, 3).map((s, i) => (
+                    <Card key={i} className="p-3">
+                      <p className="text-xs font-medium text-slate-800">{s.title}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        {severityBadge(s.severity)}
+                        <span className="text-[10px] text-slate-500">{s.category}</span>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-slate-700 mb-3">
+                  Indigenous Broadcasts
+                </p>
+                <div className="space-y-2">
+                  {filteredBroadcasts.slice(0, 3).map((b, i) => (
+                    <Card key={i} className="p-3">
+                      <p className="text-xs font-medium text-slate-800">{b.station}</p>
+                      <p className="text-xs text-slate-600 mt-1">{b.excerpt}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        {severityBadge(b.severity)}
+                        <span className="text-[10px] text-slate-500">{b.timestamp}</span>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
