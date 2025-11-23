@@ -1,5 +1,5 @@
 // app/page.tsx — THE KILLER PAGE
-// This is the page that ends every conversation about “Do we really need this?” with silence.
+// This is the page that ends every conversation about "Do we really need this?" with silence.
 // Built for the people who sign the Battery Passport Act compliance reports.
 
 "use client";
@@ -108,8 +108,8 @@ export default function HomePage() {
             </p>
           </div>
           <div className="text-right">
-            <div className="text-sm text-slate-500">Live</div>
-            <div className="text-xl font-mono text-slate-800">{time}</div>
+            <div className="text-sm text-slate-500">Last updated</div>
+            <div className="text-xl font-mono text-slate-800">{time} (Live)</div>
             <div className="mt-2 flex items-center gap-2 text-rose-700 font-medium">
               <AlertTriangle className="w-5 h-5" />
               6 active legitimacy threats
@@ -126,6 +126,9 @@ export default function HomePage() {
           </h2>
           <p className="mt-6 text-xl text-slate-600 max-w-4xl mx-auto">
             One unresolved FPIC dispute, one breached water right, one climate limit crossed — and Article 77 compliance is gone.
+          </p>
+          <p className="mt-4 text-lg font-medium text-slate-700">
+            6 active legitimacy threats across 4 corridors, affecting 3 Indigenous nations and 2 water basins.
           </p>
         </section>
 

@@ -15,6 +15,14 @@ export default function Navbar() {
     { href: "/search", label: "Search" },
   ];
 
+  const isActiveLink = (href: string) => {
+    if (href === "/") {
+      // Intelligence is the home & main intelligence surface
+      return pathname === "/" || pathname.startsWith("/intelligence");
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
   return (
     <header className="w-full border-b border-slate-200 bg-white sticky top-0 z-50 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
@@ -27,14 +35,13 @@ export default function Navbar() {
 
         <nav className="flex items-center gap-6 text-sm text-slate-600">
           {navLinks.map(({ href, label }) => {
-            const isActive =
-              pathname === href || (href === "/" && pathname === "/");
+            const active = isActiveLink(href);
             return (
               <Link
                 key={href}
                 href={href}
                 className={`relative transition-all duration-200 hover:text-emerald-700 ${
-                  isActive
+                  active
                     ? "text-emerald-700 font-medium after:content-[''] after:absolute after:-bottom-1 after:left-0 after:w-full after:h-0.5 after:bg-emerald-700"
                     : ""
                 }`}
