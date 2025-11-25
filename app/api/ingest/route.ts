@@ -4,6 +4,7 @@ import { MongoClient } from "mongodb";
 import OpenAI from "openai";
 import pdfParse from "pdf-parse";
 import crypto from "crypto";
+import { hashPayload } from "@/lib/integrity";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MONGODB_URI = process.env.MONGODB_URI!;
@@ -18,16 +19,9 @@ const BATTERY_ARTICLES = [
 
 // ---- FPIC Patterns ----
 const FPIC_CUES = [
-  "indigenous",
-  "tribal",
-  "land rights",
-  "ancestral land",
-  "community consent",
-  "consultation",
-  "UNDRIP",
-  "FPIC",
-  "indigenous peoples",
-  "stakeholder engagement",
+  "indigenous", "tribal", "land rights", "ancestral land",
+  "community consent", "consultation", "UNDRIP", "FPIC",
+  "indigenous peoples", "stakeholder engagement",
 ];
 
 // --------------------------------------------------
@@ -35,7 +29,6 @@ const FPIC_CUES = [
 // --------------------------------------------------
 function cleanJSON(output: string | null): string {
   if (!output) return "{}";
-
   return output
     .replace(/```json/gi, "")
     .replace(/```/g, "")
@@ -62,7 +55,16 @@ export async function POST(req: Request) {
     const text = pdfText.text.replace(/\s+/g, " ").trim().slice(0, 30000); // safety cap
 
     // ----------------------------------------------------------
-    // Hash for Vault integrity
+    // Hash for Vault integrity (cryptographic ledger value)
+    // ----------------------------------------------------------
+    const vaultHash = hashPayload({
+      filename: file.name,
+      textSnippet: text.slice(0, 1000),
+      timestamp: new Date().toISOString(),
+    });
+
+    // ----------------------------------------------------------
+    // Also compute raw SHA-256 of text for PDF integrity
     // ----------------------------------------------------------
     const sha256 = crypto.createHash("sha256").update(text).digest("hex");
 
@@ -169,7 +171,8 @@ Text:
       insights,
       passport,
       fpic,
-      sha256,
+      hash: vaultHash,     // ★ main integrity field
+      sha256,               // optional secondary proof
     };
 
     const result = await db.collection("documents").insertOne(doc);
@@ -185,15 +188,14 @@ Text:
     // 5. RETURN TO FRONTEND
     // ----------------------------------------------------------
     return NextResponse.json({
-      message: "✅ PDF parsed & embedded",
+      message: "📎 Document stored in Vault",
       id,
       preview: text.slice(0, 200),
-      insights,
-      passport,
-      fpic,
-      sha256,
+      hash: vaultHash,
       passportUrl,
       uploadedAt: now.toISOString(),
+      passport,
+      fpic,
     });
   } catch (err: any) {
     console.error(err);

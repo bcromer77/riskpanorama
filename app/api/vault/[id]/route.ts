@@ -36,14 +36,15 @@ export async function GET(
     const passport = doc.passport || {};
     const fpic = doc.fpic || {};
 
-    return NextResponse.json({
-      id: doc._id.toString(),
-      filename: doc.filename,
-      uploadedAt: doc.uploadedAt || null,
-      textPreview: doc.textPreview || "",
-      passport,
-      fpic,
-    });
+return NextResponse.json({
+  id: entry._id.toString(),
+  filename: entry.filename,
+  uploadedAt: entry.uploadedAt,
+  textPreview: entry.textPreview,
+  hash: entry.hash,          // 👈 REQUIRED FOR INTEGRITY BADGE
+  passport: entry.passport || {},
+  fpic: entry.fpic || {}
+});
   } catch (err: any) {
     console.error("Vault API error:", err);
     return NextResponse.json(

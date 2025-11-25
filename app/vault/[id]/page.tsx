@@ -25,6 +25,7 @@ type VaultDoc = {
   filename: string;
   uploadedAt: string;
   textPreview: string;
+  hash?: string;
   passport?: {
     articles?: Article[];
   };
@@ -38,22 +39,19 @@ export default function VaultViewerPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // Next.js 15 params unwrap
   const { id } = use(params);
 
   const router = useRouter();
-
   const [doc, setDoc] = useState<VaultDoc | null>(null);
   const [qr, setQr] = useState<string>("");
 
-  // Helper for status colours
   const chip = (status: string) => {
     const s = status.toLowerCase();
-    if (s === "compliant")
+    if (s === "verified")
       return "bg-emerald-50 text-emerald-700 border border-emerald-200";
     if (s === "needs review")
       return "bg-amber-50 text-amber-700 border border-amber-200";
-    if (s === "gap")
+    if (s === "missing evidence" || s === "gap")
       return "bg-rose-50 text-rose-700 border border-rose-200";
     return "bg-slate-100 text-slate-700 border border-slate-200";
   };
@@ -76,7 +74,6 @@ export default function VaultViewerPage({
         console.error("Failed to load vault entry:", err);
       }
     }
-
     loadDoc();
   }, [id]);
 
@@ -100,12 +97,25 @@ export default function VaultViewerPage({
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold">Vault Record</h1>
           <p className="text-sm text-slate-500">
-            Verified supplier evidence — battery passport + FPIC snapshot
+            Supplier documentation — evidence readiness snapshot
           </p>
+
+          {/* 🔒 Integrity Badge */}
+          {doc.hash && (
+            <Badge className="bg-emerald-900/40 text-emerald-300 border border-emerald-600 text-[11px] font-medium mt-1 flex items-center gap-1.5 w-fit">
+              <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+              Integrity: Verified
+            </Badge>
+          )}
+          {!doc.hash && (
+            <Badge className="bg-gray-800 text-gray-300 border border-gray-700 text-[11px] font-medium mt-1 flex items-center gap-1.5 w-fit">
+              <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
+              Integrity: Pending
+            </Badge>
+          )}
         </div>
 
         {qr && (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={qr}
             alt="QR Code"
@@ -116,57 +126,29 @@ export default function VaultViewerPage({
 
       {/* File identity */}
       <section className="bg-white border rounded-2xl p-6 shadow-sm space-y-2">
-        <h2 className="text-sm font-semibold text-slate-800">
-          Document Overview
-        </h2>
+        <h2 className="text-sm font-semibold text-slate-800">Document Overview</h2>
         <p className="text-sm text-slate-700 flex flex-col gap-1">
-          <span>
-            <strong>Filename:</strong> {doc.filename}
-          </span>
-          <span>
-            <strong>Uploaded:</strong> {uploaded}
-          </span>
-          <span>
-            <strong>Record ID:</strong>{" "}
-            <span className="font-mono">{doc.id}</span>
-          </span>
+          <span><strong>Filename:</strong> {doc.filename}</span>
+          <span><strong>Uploaded:</strong> {uploaded}</span>
+          <span><strong>Record ID:</strong> <span className="font-mono">{doc.id}</span></span>
         </p>
-
         <p className="mt-3 text-sm text-slate-600">
           <strong>Preview:</strong> {doc.textPreview || "—"}
         </p>
       </section>
 
-      {/* Passport Classification */}
+      {/* Battery Passport */}
       <section className="bg-white border rounded-2xl p-6 shadow-sm space-y-4">
-        <h2 className="text-sm font-semibold text-slate-800">
-          Battery Regulation Readiness
-        </h2>
+        <h2 className="text-sm font-semibold text-slate-800">Battery Regulation Readiness</h2>
 
         {(doc.passport?.articles ?? []).length === 0 && (
-          <p className="text-sm text-slate-500">
-            No Battery Regulation classification available.
-          </p>
+          <p className="text-sm text-slate-500">No documented readiness data.</p>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {doc.passport?.articles?.map((a) => (
-            <div
-              key={a.article}
-              className={`rounded-xl p-4 border ${chip(a.status)} space-y-1`}
-            >
-              <p className="text-sm font-medium">
-                {a.article.replace("Article", "Art.")} —{" "}
-                {a.article === "Article 7"
-                  ? "Carbon footprint"
-                  : a.article === "Article 8"
-                  ? "Due diligence"
-                  : a.article === "Article 10"
-                  ? "Recycled content"
-                  : a.article === "Article 13"
-                  ? "Digital passport"
-                  : ""}
-              </p>
+            <div key={a.article} className={`rounded-xl p-4 border ${chip(a.status)} space-y-1`}>
+              <p className="text-sm font-medium">{a.article.replace("Article", "Art.")}</p>
               <p className="text-xs opacity-80">{a.note}</p>
             </div>
           ))}
@@ -175,29 +157,20 @@ export default function VaultViewerPage({
 
       {/* FPIC Signals */}
       <section className="bg-white border rounded-2xl p-6 shadow-sm space-y-4">
-        <h2 className="text-sm font-semibold text-slate-800">
-          FPIC & Indigenous Rights Signals
-        </h2>
+        <h2 className="text-sm font-semibold text-slate-800">Community & Consultation Language</h2>
 
         {(doc.fpic?.items ?? []).length === 0 && (
-          <p className="text-sm text-slate-500">
-            No explicit FPIC / Indigenous Rights language detected.
-          </p>
+          <p className="text-sm text-slate-500">No community consultation language detected.</p>
         )}
 
         <div className="space-y-3">
           {doc.fpic?.items?.map((item, idx) => (
-            <div
-              key={idx}
-              className="rounded-xl border bg-violet-50 p-4 text-sm space-y-1"
-            >
+            <div key={idx} className="rounded-xl border bg-violet-50 p-4 text-sm space-y-1">
               <div className="flex items-center justify-between">
-                <Badge className="bg-violet-200 text-violet-900 text-[10px]">
-                  {item.category}
-                </Badge>
+                <Badge className="bg-violet-200 text-violet-900 text-[10px]">{item.category}</Badge>
                 {item.sim && (
                   <span className="text-[10px] text-slate-500">
-                    confidence {Math.round(item.sim * 100)}%
+                    relevance {Math.round(item.sim * 100)}%
                   </span>
                 )}
               </div>
@@ -209,28 +182,13 @@ export default function VaultViewerPage({
 
       {/* Actions */}
       <div className="flex gap-3">
-        <Button
-          className="bg-slate-900 text-white text-sm hover:bg-slate-800"
-          onClick={() => window.print()}
-        >
+        <Button className="bg-slate-900 text-white text-sm hover:bg-slate-800" onClick={() => window.print()}>
           Download / Print
         </Button>
-
-        <Button
-          variant="outline"
-          className="text-sm"
-          onClick={() =>
-            window.open(`/api/vault/${doc.id}`, "_blank")
-          }
-        >
+        <Button variant="outline" className="text-sm" onClick={() => window.open(`/api/vault/${doc.id}`, "_blank")}>
           View JSON
         </Button>
-
-        <Button
-          variant="outline"
-          className="text-sm"
-          onClick={() => router.push("/vault")}
-        >
+        <Button variant="outline" className="text-sm" onClick={() => router.push("/vault")}>
           ← Back to Vault
         </Button>
       </div>

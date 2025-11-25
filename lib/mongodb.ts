@@ -1,12 +1,17 @@
+// lib/mongodb.ts
+
 import { MongoClient } from "mongodb";
+// IMPORT Mongoose: Necessary for Mongoose models to attach to this connection
+import mongoose, { Connection } from "mongoose";
 
 const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
 
 if (!uri) {
-  throw new Error("Missing MONGO_URI in environment");
+  // Switched to MONGODB_URI for consistency
+  throw new Error("Missing MONGODB_URI in environment");
 }
 
-let client;
+let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
 
 declare global {
@@ -14,6 +19,7 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
+// 1. Native Driver Connection Logic (Your Original Code)
 if (process.env.NODE_ENV === "development") {
   if (!global._mongoClientPromise) {
     client = new MongoClient(uri);
@@ -25,12 +31,18 @@ if (process.env.NODE_ENV === "development") {
   clientPromise = client.connect();
 }
 
+// 2. Export Database Connections + Native Mongoose Connection
 export const getDatabases = async () => {
   const client = await clientPromise;
-  const dbV = client.db(process.env.DB_VERACITY);
+  
+  // dbV = Identity DB (e.g., veracity101), dbR = Risk DB (e.g., riskpanorama)
+  const dbV = client.db(process.env.DB_VERACITY); 
   const dbR = client.db(process.env.DB_PANORAMA);
-  return { dbV, dbR };
+  
+  // This is the native connection that Mongoose models will attach to
+  const nativeConnection = client.connection as Connection;
+
+  return { dbIdentity: dbV, dbRisk: dbR, nativeConnection, client };
 };
 
 export default clientPromise;
-

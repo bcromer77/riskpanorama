@@ -70,6 +70,7 @@ export async function GET(
       signatureVerified: doc.signatureVerified || false,
       vaultEventId: doc.vaultEventId || null,
       evidence,
+hash: doc.hash,
       extraContext,
     };
 
