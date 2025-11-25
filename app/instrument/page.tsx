@@ -1,39 +1,65 @@
-// app/instrument/page.tsx — KYE — Know Your Evidence™
-// Secure Evidence Vault for Battery Supply-Chain Legitimacy
-
+// app/instrument/page.tsx
 "use client";
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import { Upload, AlertTriangle, CheckCircle2, X, Search, FileText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { Shield, FileCheck, Download, Share2, AlertCircle, CheckCircle2 } from "lucide-react";
 
-
-type PassportArticle = {
-  article: string;
-  status: "Evidence Verified" | "Needs Validation" | "Missing Evidence";
-  note: string;
-  regulation?: string;
-};
+// -----------------------------------
+// Types matching the /api/ingest response structure
+// -----------------------------------
+type InsightItem = { type: string; text: string; sim?: number };
+type PassportArticle = { article: string; status: string; note: string };
+type FPICItem = { category: string; text: string; sim?: number };
 
 type IngestResponse = {
   message: string;
   id: string;
   preview: string;
+  insights?: InsightItem[];
   passport?: { articles?: PassportArticle[] };
+  fpic?: { items?: FPICItem[] };
 };
 
+// -----------------------------------
+// Component Helpers
+// -----------------------------------
+const statusColour = (status: string) => {
+  const s = status.toLowerCase();
+  if (s.includes("compliant")) return "bg-emerald-900/40 text-emerald-300 border border-emerald-800";
+  if (s.includes("review") || s.includes("validation")) return "bg-amber-900/40 text-amber-300 border border-amber-800";
+  if (s.includes("gap") || s.includes("missing")) return "bg-rose-900/40 text-rose-300 border border-rose-800";
+  return "bg-slate-800 text-slate-400 border border-slate-700";
+};
+
+const insightBadge = (type: string) => {
+  const t = type.toLowerCase();
+  if (t.includes("compliant")) return <Badge className="bg-emerald-500/20 text-emerald-300 text-[10px] border-emerald-700">Compliant</Badge>;
+  if (t.includes("review")) return <Badge className="bg-amber-500/20 text-amber-300 text-[10px] border-amber-700">Needs Review</Badge>;
+  if (t.includes("gap")) return <Badge className="bg-rose-500/20 text-rose-300 text-[10px] border-rose-700">Gap</Badge>;
+  return <Badge variant="outline" className="text-[10px]">{type}</Badge>;
+};
+
+// -----------------------------------
+// Main Component
+// -----------------------------------
 export default function InstrumentPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IngestResponse | null>(null);
+
+  // Optional context (currently not sent to API, but ready for future integration)
+  const [supplierName, setSupplierName] = useState("");
+  const [sku, setSku] = useState("");
+  const [notes, setNotes] = useState("");
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -44,165 +70,263 @@ export default function InstrumentPage() {
   };
 
   const handleUpload = async () => {
-    if (!file) return setError("Please choose a PDF to upload.");
+    if (!file) return setError("Please select a PDF first.");
+
     setIsUploading(true);
     setError(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/ingest", { method: "POST", body: formData });
-      if (!res.ok) throw new Error("Upload failed");
-      const data = await res.json();
+      // FUTURE STEP: Add supplierName, SKU, and notes to formData here
+
+      const res = await fetch("/api/ingest", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        
+        // CRITICAL: Handle 402 Insufficient Credits directly
+        if (res.status === 402) {
+             throw new Error(data.error || "Insufficient credits to seal document (Requires 1 credit).");
+        }
+        
+        throw new Error(data.error || `Server error ${res.status}`);
+      }
+
+      const data: IngestResponse = await res.json();
       setResult(data);
     } catch (err: any) {
-      setError(err.message || "Something went wrong.");
+      setError(err.message || "Upload failed. Try again.");
+      console.error(err);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const articles = result?.passport?.articles ?? [];
+  const handleReset = () => {
+    setFile(null);
+    setResult(null);
+    setError(null);
+    setSupplierName("");
+    setSku("");
+    setNotes("");
+  };
+
+  const passportArticles = result?.passport?.articles ?? [];
+  const fpicItems = result?.fpic?.items ?? [];
+  const insights = result?.insights ?? [];
 
   return (
-    <TooltipProvider>
-      <div className="min-h-screen bg-black text-white">
-        {/* Header */}
-        <header className="border-b border-cyan-900/30 bg-black/90 backdrop-blur">
-          <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="h-10 w-10 rounded-full bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center">
-                <Shield className="h-6 w-6 text-cyan-400" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold tracking-tight">KYE — Know Your Evidence™</h1>
-                <p className="text-xs text-cyan-400">Secure Evidence Vault for Battery Supply-Chain Legitimacy</p>
-              </div>
+    <div className="min-h-screen bg-slate-950 text-slate-50">
+      {/* Header */}
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-xs font-semibold">
+              REM
             </div>
-            <Button variant="ghost" size="sm" onClick={() => router.push("/")}>
-              ← Back
+            <div>
+              <h1 className="text-sm font-semibold">Instrument</h1>
+              <p className="text-xs text-slate-400">Battery Passport & FPIC Compliance Workbench</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" className="border-slate-700 text-xs" onClick={() => router.push("/vault")}>
+              ← Go to Vault
             </Button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        <main className="mx-auto max-w-7xl px-6 py-8">
-          <div className="grid lg:grid-cols-2 gap-8">
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <div className="grid gap-6 lg:grid-cols-[1.1fr_1.6fr]">
 
-            {/* LEFT — Upload */}
-            <Card className="border-cyan-900/50 bg-black/50">
+          {/* LEFT COLUMN */}
+          <section className="space-y-5">
+
+            {/* Upload Card */}
+            <Card className="border-slate-800 bg-slate-900/60 backdrop-blur">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileCheck className="h-5 w-5 text-cyan-400" />
-                  Upload Evidence Source
+                <CardTitle className="text-sm flex justify-between items-center">
+                  <span className="flex items-center gap-2">
+                    <Upload className="w-4 h-4" /> Upload & Analyse (1 Credit)
+                  </span>
+                  <span className="text-[11px] text-slate-400">PDF only • max 100 MB</span>
                 </CardTitle>
-                <p className="text-sm text-gray-400">
-                  Upload declarations, contracts, audits, LCAs & FPIC documentation for evidence validation.
-                </p>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <label className="block cursor-pointer rounded-xl border-2 border-dashed border-cyan-800/50 bg-black/30 p-12 text-center hover:border-cyan-400 transition">
-                  <div className="mx-auto max-w-sm">
-                    <div className="mb-4 flex justify-center">
-                      <div className="h-20 w-20 rounded-full bg-cyan-500/20 border-4 border-cyan-400 flex items-center justify-center">
-                        <FileCheck className="h-12 w-12 text-cyan-400" />
-                      </div>
+              <CardContent className="space-y-4">
+                <label htmlFor="file-upload" className="block cursor-pointer rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center hover:border-emerald-500/60 transition">
+                  <div className="mx-auto max-w-xs space-y-3">
+                    <div className="h-12 w-12 mx-auto rounded-full bg-emerald-500/15 border border-emerald-400/40 flex items-center justify-center">
+                      <FileText className="w-6 h-6 text-emerald-400" />
                     </div>
-                    <p className="text-sm font-medium">Drop a supplier declaration, technical spec, or ESG claim</p>
-                    <Input type="file" accept=".pdf" className="mt-6" onChange={handleFileChange} />
-                    {file && <p className="mt-3 text-xs text-cyan-300">Selected: {file.name}</p>}
+                    <p className="text-sm font-medium">Drop your supplier PDF here</p>
+                    <p className="text-xs text-slate-400">LCA, audit report, ESG policy, technical spec…</p>
                   </div>
+                  <Input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    id="file-upload"
+                    onChange={handleFileChange}
+                  />
                 </label>
 
-                <Button
-                  onClick={handleUpload}
-                  disabled={!file || isUploading}
-                  className="w-full h-14 bg-cyan-500 text-black hover:bg-cyan-400 font-bold text-lg"
-                >
-                  {isUploading ? "Extracting & Verifying…" : "Extract & Verify Evidence"}
-                </Button>
+                {file && (
+                  <div className="flex items-center justify-between bg-slate-900/80 rounded-lg px-4 py-2">
+                    <span className="text-xs text-emerald-300 truncate max-w-[200px]">{file.name}</span>
+                    <button onClick={() => setFile(null)} className="text-xs text-slate-500 hover:text-slate-300">Remove</button>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleUpload}
+                    disabled={!file || isUploading}
+                    className="flex-1 bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:opacity-50"
+                  >
+                    {isUploading ? "Analysing…" : "Analyse & Seal"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleReset} className="border-slate-700 text-xs">
+                    Reset
+                  </Button>
+                </div>
+
+                {error && (
+                  <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/50 text-rose-300 text-xs">
+                    {error}
+                  </div>
+                )}
+
+                {result && (
+                  <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/50 text-emerald-300 text-xs">
+                    {result.message} • Sealed as <span className="font-mono">{result.id.slice(-8)}</span>
+                    <Button 
+                        onClick={() => router.push(`/vault/${result.id}`)}
+                        variant="ghost"
+                        size="sm"
+                        className="float-right text-[10px] text-slate-400 hover:text-emerald-300 p-0 h-auto"
+                    >
+                        View Vault Record →
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            {/* RIGHT — Results */}
-            <div className="space-y-6">
+            {/* Optional Context */}
+            <Card className="border-slate-800 bg-slate-900/60">
+              <CardHeader>
+                <CardTitle className="text-sm">Supplier Context (optional)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <Input placeholder="Supplier name" value={supplierName} onChange={e => setSupplierName(e.target.value)} className="text-xs border-slate-700 bg-slate-950/70" />
+                  <Input placeholder="SKU / Part ID" value={sku} onChange={e => setSku(e.target.value)} className="text-xs border-slate-700 bg-slate-950/70" />
+                </div>
+                <Textarea
+                  placeholder="Notes: What are you checking? Carbon? FPIC? Recycled content?"
+                  rows={3}
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  className="text-xs border-slate-700 bg-slate-950/70"
+                />
+              </CardContent>
+            </Card>
+          </section>
 
-              {/* Extracted Evidence Summary */}
-              <Card className="border-cyan-900/50 bg-black/50">
-                <CardHeader>
-                  <CardTitle>Extracted Evidence Summary</CardTitle>
-                  <p className="text-sm text-gray-400">
-                    Only machine-readable evidence relevant to admissible claims is shown.
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  {result ? (
-                    <p className="text-sm text-gray-300 leading-relaxed">{result.preview}</p>
-                  ) : (
-                    <p className="text-sm text-gray-500">Upload evidence to see verified summary.</p>
-                  )}
-                </CardContent>
-              </Card>
+          {/* RIGHT COLUMN — Results */}
+          <section className="space-y-5">
 
-              {/* NEW: Evidence Classification Card */}
-              <Card className="border-cyan-900/50 bg-black/50">
-                <CardHeader>
-                  <CardTitle>Evidence Classification — Passport Inputs & Legitimacy Requirements</CardTitle>
-                  <p className="text-sm text-gray-400">
-                    Classified against EU Battery Regulation (Art. 7, 8, 10, 13, 77), CSDDD, LkSG and FPIC obligations.
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  {articles.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {articles.map((a: any, idx: number) => (
-                        <div key={idx} className="rounded-lg border border-cyan-800/40 px-4 py-3 text-xs bg-black/40">
-                          <div className="flex justify-between items-start mb-2">
-                            <span className="font-semibold text-cyan-300">
-                              {a.article.replace("Article", "Art.")}
-                            </span>
-                            <div>
-                              {a.status === "Evidence Verified" && (
-                                <Badge className="bg-emerald-900/30 text-emerald-300 border-emerald-700 text-[10px]">
-                                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                                  Verified
-                                </Badge>
-                              )}
-                              {a.status === "Needs Validation" && (
-                                <Badge className="bg-amber-900/30 text-amber-300 border-amber-700 text-[10px]">
-                                  <AlertCircle className="w-3 h-3 mr-1" />
-                                  Needs Validation
-                                </Badge>
-                              )}
-                              {a.status === "Missing Evidence" && (
-                                <Badge className="bg-rose-900/30 text-rose-300 border-rose-700 text-[10px]">
-                                  <AlertCircle className="w-3 h-3 mr-1" />
-                                  Missing
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-[11px] text-gray-400 leading-tight">{a.note}</p>
+            {/* Passport Articles (6-Article Classification) */}
+            <Card className="border-slate-800 bg-slate-900/80">
+              <CardHeader>
+                <CardTitle className="text-sm">Battery Regulation Articles (Art. 7, 8, 10, 12, 13, 39)</CardTitle>
+                <p className="text-xs text-slate-400">Classification against the six mandatory data groups required by the EU Battery Regulation.</p>
+              </CardHeader>
+              <CardContent>
+                {passportArticles.length === 0 ? (
+                  <p className="text-xs text-slate-500">No classification yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {passportArticles.map((a, i) => (
+                      <div key={i} className={`p-4 rounded-xl ${statusColour(a.status)}`}>
+                        <div className="font-semibold text-xs mb-1">{a.article.replace("Article", "Art.")}</div>
+                        <div className="text-[11px] opacity-90">{a.note}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* FPIC Signals */}
+            <Card className="border-slate-800 bg-slate-900/80">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-violet-400" /> FPIC & Indigenous Rights Signals
+                </CardTitle>
+                <p className="text-xs text-slate-400">Extraction of contextual language relating to Free, Prior and Informed Consent.</p>
+              </CardHeader>
+              <CardContent>
+                {fpicItems.length === 0 ? (
+                  <p className="text-xs text-slate-500">No FPIC signals detected.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {fpicItems.map((item, i) => (
+                      <div key={i} className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/30">
+                        <Badge className="mb-2 text-[10px] bg-violet-500/30 text-violet-200">{item.category}</Badge>
+                        <p className="text-xs text-slate-200">{item.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            
+            {/* Insights */}
+            <Card className="border-slate-800 bg-slate-900/80 mb-4">
+              <CardHeader>
+                <CardTitle className="text-sm">Compliance Insights (AI-Analyzed Snippets)</CardTitle>
+                <p className="text-xs text-slate-400">Directly extracted and categorized snippets from the PDF.</p>
+              </CardHeader>
+              <CardContent>
+                {insights.length === 0 ? (
+                  <p className="text-xs text-slate-500">Upload to see detailed insights.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {insights.map((ins, idx) => (
+                      <div key={idx} className="p-3 rounded-lg bg-slate-900/80 border border-slate-700">
+                        <div className="flex items-center justify-between mb-2">
+                          {insightBadge(ins.type)}
+                          {ins.sim !== undefined && (
+                            <span className="text-[10px] text-slate-500">relevance {(ins.sim * 100).toFixed(0)}%</span>
+                          )}
                         </div>
-                      ))}
+                        <p className="text-xs text-slate-200">{ins.text}</p>
+                      </div>
+                    ))}
+                    <div className="flex justify-end pt-2">
+                        <Button 
+                            onClick={() => router.push("/search")}
+                            variant="outline"
+                            size="sm"
+                            className="border-slate-700 text-xs text-slate-400 hover:text-emerald-300 flex items-center gap-1"
+                        >
+                            <Search className="w-3 h-3" /> Run Agentic Risk Scan
+                        </Button>
                     </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">Upload evidence to see classification.</p>
-                  )}
-                </CardContent>
-              </Card>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
-              {/* Your existing FPIC / Insights cards go here — unchanged */}
-
-            </div>
-          </div>
-
-          {/* Critical Liability Shield */}
-          <p className="text-[10px] text-gray-500 mt-12 text-center max-w-4xl mx-auto leading-relaxed">
-            This tool validates evidence presence, attribution and completeness. 
-            It does not constitute legal advice, certification, or factual verification of supplier claims.
-          </p>
-        </main>
-      </div>
-    </TooltipProvider>
+          </section>
+        </div>
+      </main>
+    </div>
   );
 }

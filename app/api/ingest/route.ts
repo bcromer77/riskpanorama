@@ -1,205 +1,188 @@
 // app/api/ingest/route.ts
+
 import { NextResponse } from "next/server";
-import { MongoClient } from "mongodb";
-import OpenAI from "openai";
-import pdfParse from "pdf-parse";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { getDatabases } from "@/lib/mongodb"; // Use the native client utility
+import { ratelimit } from "@/lib/ratelimit"; // Rate limiting utility
+import { headers } from "next/headers";
 import crypto from "crypto";
-import { hashPayload } from "@/lib/integrity";
+import { processDocument } from "@/lib/classification"; // The Classification Brain
+import { ObjectId } from "mongodb"; // Required for using ObjectId constructors
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MONGODB_URI = process.env.MONGODB_URI!;
-
-// ---- Battery Passport Articles we map against ----
-const BATTERY_ARTICLES = [
-  { id: "Article 7", label: "Carbon Footprint Declaration" },
-  { id: "Article 8", label: "Due Diligence Obligations" },
-  { id: "Article 10", label: "Recycled Content" },
-  { id: "Article 13", label: "QR Code + Digital Passport" },
-];
-
-// ---- FPIC Patterns ----
-const FPIC_CUES = [
-  "indigenous", "tribal", "land rights", "ancestral land",
-  "community consent", "consultation", "UNDRIP", "FPIC",
-  "indigenous peoples", "stakeholder engagement",
-];
-
-// --------------------------------------------------
-// SAFEST JSON CLEANER ON EARTH
-// --------------------------------------------------
-function cleanJSON(output: string | null): string {
-  if (!output) return "{}";
-  return output
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .replace(/^\s+|\s+$/g, "")
-    .trim();
-}
-
-// --------------------------------------------
-// MAIN INGEST FUNCTION
-// --------------------------------------------
+// -----------------------------------------------------------------------------
+// POST /api/ingest – Seal a document (The Integrated Engine)
+// -----------------------------------------------------------------------------
 export async function POST(req: Request) {
-  try {
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
+    const requestId = crypto.randomUUID();
+    const startTime = Date.now();
+    let mongoSession: any = null; // Variable to hold MongoDB session
 
-    if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    try {
+        // --- 1. PRE-PROCESSING & AUTHENTICATION ---
+        const headerList = headers();
+        const idempotencyKey = headerList.get("idempotency-key")?.slice(0, 100) || null;
+        const contentLength = headerList.get("content-length");
+        const ip = headerList.get("x-forwarded-for")?.split(",")[0] || "unknown";
+
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id || !session.user.organisationId) {
+            return NextResponse.json({ error: "Unauthenticated" }, { status: 401, headers: { "X-Request-ID": requestId } });
+        }
+        
+        const userId = session.user.id as string;
+        const organisationId = session.user.organisationId as string;
+        // userCredits is still read from session, but we use the live DB value for the audit log
+        // const userCredits = session.user.credits as number; 
+
+        // 2. Rate limiting (per organisation)
+        const { success } = await ratelimit(5, "30 s").limit(`ingest:${organisationId}`);
+        if (!success) {
+            return NextResponse.json({ error: "Rate limit exceeded. Please slow down." }, { status: 429, headers: { "X-Request-ID": requestId } });
+        }
+        
+        // 3. Input size guardrail (100 MB max)
+        if (contentLength && parseInt(contentLength) > 100_000_000) {
+            return NextResponse.json({ error: "File too large. Maximum 100 MB allowed." }, { status: 413, headers: { "X-Request-ID": requestId } });
+        }
+
+        // 4. File Parsing and Initial Check
+        const formData = await req.formData();
+        const file = formData.get("file") as File | null;
+        if (!file || !(file instanceof File)) {
+            return NextResponse.json({ error: "No valid file uploaded" }, { status: 400, headers: { "X-Request-ID": requestId } });
+        }
+        
+        const buffer = Buffer.from(await file.arrayBuffer());
+
+        // --- 5. CLASSIFICATION & PROOF GENERATION ---
+        
+        // Use the classification utility to process the document
+        const { text, textPreview, passport, fpic } = await processDocument(buffer, file.name);
+
+        // Compute cryptographic proofs (SHA-3-512 for vault hash, SHA-256 for secondary proof)
+        const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+        const vaultHash = crypto.createHash("sha3-512").update(buffer).digest("hex");
+
+        // --- 6. ATOMIC TRANSACTION (Credit Deduction, Insert, Audit Log) ---
+        
+        const { dbIdentity, client } = await getDatabases(); // Get client and identity DB
+        const dbSealedDocuments = client.db("rareearthminerals").collection("sealed_documents");
+        const dbAuditTrail = dbIdentity.collection("audit_trail");
+        const dbUsers = dbIdentity.collection("users"); // Use native collection for transactional update
+
+        // Idempotency check first
+        if (idempotencyKey) {
+            const existing = await dbSealedDocuments.findOne({ idempotencyKey });
+            if (existing) {
+                // Returns the existing sealed document if key matches
+                return NextResponse.json({
+                    success: true,
+                    documentId: existing._id,
+                    verificationUrl: `${process.env.NEXT_PUBLIC_APP_URL}/verify/${existing._id}`,
+                    message: "Idempotent request – returning existing document",
+                }, { headers: { "X-Request-ID": requestId } });
+            }
+        }
+
+        mongoSession = client.startSession();
+        let docResult: any;
+        let finalCreditsAfter: number; // Variable to hold the actual post-transaction credit count
+
+        await mongoSession.withTransaction(async () => {
+            // A. Deduct Credit (CRITICAL COMMERCIAL STEP)
+            const userUpdate = await dbUsers.findOneAndUpdate(
+                // Use new ObjectId() constructor for safety
+                { _id: new ObjectId(userId), credits: { $gte: 1 } }, 
+                { $inc: { credits: -1 } },
+                { returnDocument: "after", session: mongoSession }
+            );
+            
+            if (!userUpdate.value) {
+                // This failure automatically rolls back the transaction
+                throw new Error("Insufficient credits");
+            }
+
+            // Capture the precise credit values for the audit log (THE FIX)
+            finalCreditsAfter = userUpdate.value.credits;
+            const finalCreditsBefore = finalCreditsAfter + 1;
+
+
+            // B. Insert the Sealed Document (The Vault Record)
+            const now = new Date();
+            const sealedDoc = {
+                filename: file.name,
+                size: file.size,
+                mimeType: file.type,
+                uploadedAt: now,
+                uploadedByIp: ip,
+
+                // Identity & Tenancy (EPIC 1 INTEGRATION)
+                sealedByUserId: new ObjectId(userId),
+                sealedByOrganisationId: new ObjectId(organisationId),
+
+                // Classification Data (EPIC 2.2)
+                textPreview: textPreview,
+                passport, // All 6 articles
+                fpic,
+
+                // Core Integrity (EPIC 2.3)
+                hash: vaultHash,
+                sha256,
+                idempotencyKey: idempotencyKey || null,
+                _requestId: requestId,
+                _fullText: text // Store full text for future Vector Search / Agentic RAG (EPIC 6.4)
+            };
+            
+            docResult = await dbSealedDocuments.insertOne(sealedDoc, { session: mongoSession });
+
+            // C. Immutable Audit Trail (Proof of action)
+            await dbAuditTrail.insertOne({
+                event: "DOCUMENT_SEALED",
+                userId: new ObjectId(userId),
+                organisationId: new ObjectId(organisationId),
+                documentId: docResult.insertedId,
+                timestamp: now,
+                // --- AUDIT ACCURACY FIX ---
+                creditsBefore: finalCreditsBefore, 
+                creditsAfter: finalCreditsAfter,
+                // --------------------------
+                hash: vaultHash,
+                _requestId: requestId,
+            }, { session: mongoSession });
+        });
+
+        // 7. Structured logging
+        console.log(JSON.stringify({
+            level: "info", message: "Document sealed successfully", requestId, userId, organisationId,
+            documentId: docResult.insertedId, filename: file.name, processingMs: Date.now() - startTime, ip,
+        }));
+
+        // 8. Final response – includes public verification URL
+        return NextResponse.json({
+            success: true,
+            documentId: docResult.insertedId,
+            verificationUrl: `${process.env.NEXT_PUBLIC_APP_URL}/verify/${docResult.insertedId}`,
+            sealedAt: new Date().toISOString(),
+            hash: vaultHash,
+            message: "Document permanently sealed with cryptographic proof",
+            passport: docResult.passport, // Return classification result
+        }, { status: 201, headers: { "X-Request-ID": requestId } });
+
+    } catch (err: any) {
+        if (mongoSession) await mongoSession.abortTransaction();
+        
+        const statusMap: Record<string, number> = { "Insufficient credits": 402 };
+        const status = statusMap[err.message] || 500;
+
+        console.error(JSON.stringify({ level: "error", message: "Ingest failed", requestId, error: err.message, processingMs: Date.now() - startTime }));
+
+        return NextResponse.json({ error: err.message || "Internal server error" }, { status, headers: { "X-Request-ID": requestId } });
+        
+    } finally {
+        if (mongoSession) await mongoSession.endSession();
     }
-
-    // Convert file to buffer and parse PDF
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const pdfText = await pdfParse(buffer);
-
-    const text = pdfText.text.replace(/\s+/g, " ").trim().slice(0, 30000); // safety cap
-
-    // ----------------------------------------------------------
-    // Hash for Vault integrity (cryptographic ledger value)
-    // ----------------------------------------------------------
-    const vaultHash = hashPayload({
-      filename: file.name,
-      textSnippet: text.slice(0, 1000),
-      timestamp: new Date().toISOString(),
-    });
-
-    // ----------------------------------------------------------
-    // Also compute raw SHA-256 of text for PDF integrity
-    // ----------------------------------------------------------
-    const sha256 = crypto.createHash("sha256").update(text).digest("hex");
-
-    // ----------------------------------------------------------
-    // 1. GENERAL INSIGHT CLASSIFICATION
-    // ----------------------------------------------------------
-    const insightPrompt = `
-You are analysing a PDF on sustainability, supply-chain, energy or materials science. 
-Classify content into:
-- Compliant (aligned with obligations)
-- Needs Review (partially aligned or unclear)
-- Gap (missing required elements)
-
-Return EXACT JSON array:
-[
-  { "type": "Compliant", "text": "...", "sim": 0.xx },
-  { "type": "Needs Review", "text": "...", "sim": 0.xx },
-  { "type": "Gap", "text": "...", "sim": 0.xx }
-]
-
-Only give points that appear in the text.
-Text:
-"""${text}"""
-    `;
-
-    const insightsResp = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: insightPrompt,
-    });
-
-    const insights = JSON.parse(cleanJSON(insightsResp.output_text));
-
-    // ----------------------------------------------------------
-    // 2. BATTERY PASSPORT ARTICLE MAPPING
-    // ----------------------------------------------------------
-    const passportPrompt = `
-Analyse the document against EU Battery Regulation Articles:
-${BATTERY_ARTICLES.map((a) => `${a.id}: ${a.label}`).join("\n")}
-
-Return EXACT JSON:
-{
-  "articles": [
-    { "article": "Article 7", "status": "Compliant|Needs Review|Gap", "note": "..." },
-    { "article": "Article 8", "status": "Compliant|Needs Review|Gap", "note": "..." },
-    { "article": "Article 10", "status": "Compliant|Needs Review|Gap", "note": "..." },
-    { "article": "Article 13", "status": "Compliant|Needs Review|Gap", "note": "..." }
-  ]
 }
 
-Text:
-"""${text}"""
-    `;
-
-    const passportResp = await openai.responses.create({
-      model: "gpt-4.1",
-      input: passportPrompt,
-    });
-
-    const passport = JSON.parse(cleanJSON(passportResp.output_text));
-
-    // ----------------------------------------------------------
-    // 3. FPIC / INDIGENOUS RIGHTS EXTRACTION
-    // ----------------------------------------------------------
-    const fpicPrompt = `
-Extract FPIC (Free, Prior and Informed Consent) and Indigenous Rights signals.
-
-Look for:
-${FPIC_CUES.join(", ")}
-
-Return EXACT JSON:
-{
-  "items": [
-    { "category": "FPIC", "text": "...", "sim": 0.xx },
-    { "category": "Rights", "text": "...", "sim": 0.xx }
-  ]
-}
-
-Only return items if the text actually mentions them.
-
-Text:
-"""${text}"""
-    `;
-
-    const fpicResp = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: fpicPrompt,
-    });
-
-    const fpic = JSON.parse(cleanJSON(fpicResp.output_text));
-
-    // ----------------------------------------------------------
-    // 4. WRITE TO MONGODB (Vault)
-    // ----------------------------------------------------------
-    const client = new MongoClient(MONGODB_URI);
-    await client.connect();
-    const db = client.db("rareearthminerals");
-
-    const now = new Date();
-
-    const doc = {
-      filename: file.name,
-      uploadedAt: now,
-      textPreview: text.slice(0, 500),
-      insights,
-      passport,
-      fpic,
-      hash: vaultHash,     // ★ main integrity field
-      sha256,               // optional secondary proof
-    };
-
-    const result = await db.collection("documents").insertOne(doc);
-    await client.close();
-
-    const id = result.insertedId.toString();
-
-    const baseUrl =
-      process.env.NEXT_PUBLIC_APP_URL || "https://www.rareearthminerals.ai";
-    const passportUrl = `${baseUrl.replace(/\/$/, "")}/passport/${id}`;
-
-    // ----------------------------------------------------------
-    // 5. RETURN TO FRONTEND
-    // ----------------------------------------------------------
-    return NextResponse.json({
-      message: "📎 Document stored in Vault",
-      id,
-      preview: text.slice(0, 200),
-      hash: vaultHash,
-      passportUrl,
-      uploadedAt: now.toISOString(),
-      passport,
-      fpic,
-    });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
-
+// Optional: Enforce only POST and dynamic execution
+export const dynamic = "force-dynamic";

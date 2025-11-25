@@ -1,84 +1,127 @@
-// app/vault/page.tsx — The Evidence Vault (Final — Neutral & Deterministic)
-//
-// This page displays evidence in three factual states:
-// ● Verified            (document exists + signature)
-// ○ Needs Checking      (document incomplete/inconsistent)
-// × Missing Evidence    (document missing/invalid)
-//
-// FPIC content is NOT interpreted as ethics, conflict, risk, or compliance.
-// It is displayed strictly as: Extra Context.
-//
-// Wording is regulator-safe, tribe-neutral, court-compatible.
-
 "use client";
-
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Share2, Fingerprint, Users } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { AlertCircle, CheckCircle2, X } from "lucide-react";
+
+// -----------------------------------
+// Types matching the /api/document response structure
+// -----------------------------------
+type Article = {
+  article: string;
+  status: string;
+  note: string;
+};
 
 type VaultDoc = {
   id: string;
   filename: string;
-  uploadedAt: string;
+  uploadedAt: string | null;
   textPreview: string;
-  vaultEventId?: string;
-  signatureVerified?: boolean;
-  passport?: {
-    articles?: { article: string; status: string; note: string }[];
-  };
-  fpic?: {
-    items?: { category: string; text: string; sim?: number }[];
-  };
+  hash: string | null; // Added for UI display
+  passport: {
+    articles?: Article[];
+  } | null;
+  fpic: {
+    items?: {
+      category: string;
+      text: string;
+      sim?: number;
+    }[];
+  } | null;
 };
 
-// Deterministic Evidence Status Chips
+// -----------------------------------
+// Helpers
+// -----------------------------------
+
+// Helper to determine badge style based on article status
 function statusChip(status: string) {
   const s = status.toLowerCase();
-
-  if (s.includes("verified"))
+  
+  if (s === "compliant") {
     return (
-      <Badge className="bg-emerald-900/40 text-emerald-200 border-emerald-700 text-xs">
-        ● Verified
-      </Badge>
+      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-200">
+        <CheckCircle2 className="w-3 h-3 mr-1" /> Compliant
+      </span>
     );
-
-  if (s.includes("missing"))
+  }
+  if (s === "needs review" || s === "needs validation") {
     return (
-      <Badge className="bg-rose-900/40 text-rose-200 border-rose-700 text-xs">
-        × Missing Evidence
-      </Badge>
+      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
+        <AlertCircle className="w-3 h-3 mr-1" /> Needs Review
+      </span>
     );
-
+  }
+  if (s === "gap" || s === "missing evidence") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700 border border-rose-200">
+        <X className="w-3 h-3 mr-1" /> Gap
+      </span>
+    );
+  }
   return (
-    <Badge className="bg-amber-900/40 text-amber-200 border-amber-700 text-xs">
-      ○ Needs Checking
+    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 border border-slate-200">
+      {status}
+    </span>
+  );
+}
+
+// Helper to display FPIC presence
+function fpicBadge(doc: VaultDoc) {
+  const count = doc.fpic?.items?.length ?? 0;
+  if (count === 0) {
+    return (
+      <Badge className="bg-slate-800 text-[10px] font-normal text-slate-200">
+        No FPIC signals
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="bg-violet-100 text-violet-900 text-[10px] font-medium border border-violet-400">
+      FPIC / Indigenous: {count} signals
     </Badge>
   );
 }
 
-// Shareable public record link (neutral wording)
-function handleShareDoc(id: string, filename: string) {
-  const url = `${window.location.origin}/passport/${id}`;
-  navigator.clipboard.writeText(url);
-  alert(`Share link copied for: ${filename}`);
-}
-
+// -----------------------------------
+// Main Component
+// -----------------------------------
 export default function VaultPage() {
   const router = useRouter();
   const [docs, setDocs] = useState<VaultDoc[]>([]);
+  const [filtered, setFiltered] = useState<VaultDoc[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "compliant" | "gaps" | "fpic">(
+    "all"
+  );
 
+  // 1. Fetch data from the secure, multi-tenant API
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch("/api/document", { cache: "no-store" });
+        const res = await fetch("/api/document", { cache: "no-store" }); 
+        
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          // CRITICAL: A 401 means the user needs to re-auth
+          if (res.status === 401) throw new Error("Session expired. Please log in again.");
+          throw new Error(data.error || `Failed with ${res.status}`);
+        }
+        
         const data = await res.json();
-        setDocs(data.documents || []);
-      } catch (err) {
-        console.error("Failed to load vault:", err);
+        const docsData: VaultDoc[] = data.documents || [];
+        setDocs(docsData);
+        setFiltered(docsData);
+        
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message || "Failed to load vault. Check network and login status.");
       } finally {
         setLoading(false);
       }
@@ -86,141 +129,266 @@ export default function VaultPage() {
     load();
   }, []);
 
-  const total = docs.length;
-  const verified = docs.filter((d) => d.signatureVerified === true).length;
-  const withFPIC = docs.filter((d) => (d.fpic?.items?.length ?? 0) > 0).length;
+  // 2. Client-side Filtering Logic (reacts to query/filter state)
+  useEffect(() => {
+    let next = [...docs];
+    
+    // Apply search query filter
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      next = next.filter((d) =>
+        [d.filename, d.textPreview, d.hash].some((t) =>
+          (t || "").toLowerCase().includes(q)
+        )
+      );
+    }
+    
+    // Apply status filter
+    if (filter === "compliant") {
+      // Document must have articles AND all articles must be compliant
+      next = next.filter((d) => {
+        const articles = d.passport?.articles ?? [];
+        return (
+          articles.length > 0 &&
+          articles.every((a) => a.status.toLowerCase() === "compliant")
+        );
+      });
+    } else if (filter === "gaps") {
+      // Document must have at least one gap status
+      next = next.filter((d) =>
+        (d.passport?.articles ?? []).some(
+          (a) => a.status.toLowerCase() === "gap" || a.status.toLowerCase() === "missing evidence"
+        )
+      );
+    } else if (filter === "fpic") {
+      // Document must have at least one FPIC signal detected
+      next = next.filter((d) => (d.fpic?.items?.length ?? 0) > 0);
+    }
+    setFiltered(next);
+  }, [docs, query, filter]);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Header */}
-      <div className="border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-6 py-12">
-          <div className="space-y-4">
-            <h1 className="text-6xl font-black tracking-tighter">The Vault</h1>
-            <p className="text-xl text-gray-300 max-w-3xl">
-              Signed. Append-only. Evidence that cannot be altered.
-            </p>
+    <div className="min-h-screen bg-slate-950 text-slate-50">
+      {/* Top bar */}
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur">
+        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-xs font-semibold tracking-tight">
+              REM
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold tracking-tight text-slate-50">
+                Vault
+              </h1>
+              <p className="text-xs text-slate-400">
+                Secure Evidence Vault · Immutable audit trail for your organization.
+              </p>
+            </div>
           </div>
-          <div className="mt-8 text-right">
-            <p className="text-4xl font-black text-cyan-400">{total} evidence records</p>
-            <p className="text-sm text-gray-400">{verified} verified signatures</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-3 gap-6">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 text-center">
-          <p className="text-5xl font-black text-emerald-400">{verified}</p>
-          <p className="text-sm text-gray-400 mt-2">Verified</p>
-        </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 text-center">
-          <p className="text-5xl font-black text-amber-400">{total - verified}</p>
-          <p className="text-sm text-gray-400 mt-2">Needs Checking / Missing</p>
-        </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6 text-center">
-          <p className="text-5xl font-black text-cyan-400">{withFPIC}</p>
-          <p className="text-sm text-gray-400 mt-2">Extra Context Detected</p>
-        </div>
-      </div>
-
-      {/* Document List */}
-      <div className="max-w-7xl mx-auto px-6 pb-20 space-y-4">
-        {loading ? (
-          <p className="text-center text-gray-400 py-20">Loading vault…</p>
-        ) : docs.length === 0 ? (
-          <Card className="bg-zinc-900/50 border-zinc-800 p-20 text-center space-y-4">
-            <FileText className="w-16 h-16 text-gray-600 mx-auto" />
-            <p className="text-xl text-gray-300">No evidence records yet</p>
-            <p className="text-sm text-gray-500">
-              Upload in Instrument → records appear here as immutable evidence.
-            </p>
-          </Card>
-        ) : (
-          docs.map((doc) => (
-            <Card
-              key={doc.id}
-              className="bg-zinc-900/50 border border-zinc-800 hover:border-cyan-500/70 transition-all"
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              className="border-slate-700 bg-slate-900 text-xs text-slate-200"
+              onClick={() => router.push("/instrument")}
             >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="text-lg font-semibold flex items-center gap-3">
-                      {doc.signatureVerified && (
-                        <Fingerprint className="w-5 h-5 text-cyan-400" />
-                      )}
+              ← Back to Instrument
+            </Button>
+          </div>
+        </div>
+      </header>
+      {/* Content */}
+      <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
+        {/* Page header controls */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-50">
+              Battery Passport & FPIC Vault
+            </h2>
+            <p className="text-xs text-slate-400 max-w-2xl">
+              One command centre: view and share sealed supplier evidence with auditors, retailers, and counsel.
+            </p>
+          </div>
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+            <Input
+              placeholder="Search filename, preview text, or hash ID…"
+              className="border-slate-700 bg-slate-950/70 text-xs w-full sm:w-56"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <div className="flex gap-1 justify-end">
+              <Button
+                size="sm"
+                variant={filter === "all" ? "default" : "outline"}
+                className={
+                  filter === "all"
+                    ? "bg-slate-100 text-slate-900 text-[11px]"
+                    : "border-slate-700 text-[11px] text-slate-200 bg-slate-900"
+                }
+                onClick={() => setFilter("all")}
+              >
+                All ({docs.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={filter === "compliant" ? "default" : "outline"}
+                className={
+                  filter === "compliant"
+                    ? "bg-emerald-500 text-emerald-950 text-[11px]"
+                    : "border-slate-700 text-[11px] text-slate-200 bg-slate-900"
+                }
+                onClick={() => setFilter("compliant")}
+              >
+                Fully compliant
+              </Button>
+              <Button
+                size="sm"
+                variant={filter === "gaps" ? "default" : "outline"}
+                className={
+                  filter === "gaps"
+                    ? "bg-rose-500 text-rose-50 text-[11px]"
+                    : "border-slate-700 text-[11px] text-slate-200 bg-slate-900"
+                }
+                onClick={() => setFilter("gaps")}
+              >
+                Gaps
+              </Button>
+              <Button
+                size="sm"
+                variant={filter === "fpic" ? "default" : "outline"}
+                className={
+                  filter === "fpic"
+                    ? "bg-violet-500 text-violet-50 text-[11px]"
+                    : "border-slate-700 text-[11px] text-slate-200 bg-slate-900"
+                }
+                onClick={() => setFilter("fpic")}
+              >
+                FPIC signals
+              </Button>
+            </div>
+          </div>
+        </div>
+        
+        {/* Status Indicators */}
+        <div className="flex items-center justify-between">
+          <Badge className="bg-emerald-500/15 text-emerald-300 border border-emerald-500/50 text-[10px]">
+            Live Multi-Tenant Vault
+          </Badge>
+          <p className="text-[11px] text-slate-500">
+            {filtered.length} document{filtered.length === 1 ? "" : "s"} shown
+          </p>
+        </div>
+        
+        {/* Loading and Error States */}
+        {loading && (
+          <p className="text-xs text-slate-500 mt-2">Loading vault…</p>
+        )}
+        {error && (
+          <p className="text-xs text-rose-300 border border-rose-500/50 bg-rose-500/10 rounded-lg px-3 py-2 mt-2">
+            {error}
+          </p>
+        )}
+        {!loading && !error && filtered.length === 0 && (
+          <p className="text-xs text-slate-500 mt-2">
+            No documents match this view. Upload a PDF in the Instrument workspace (Art. 7, 8, 10, 12, 13, 39 classified) and it will appear here automatically.
+          </p>
+        )}
+        
+        {/* Document List */}
+        <div className="space-y-3 mt-2">
+          {filtered.map((doc) => {
+            const articles = doc.passport?.articles ?? [];
+            const uploaded =
+              doc.uploadedAt && !Number.isNaN(Date.parse(doc.uploadedAt))
+                ? new Date(doc.uploadedAt).toLocaleDateString()
+                : "—";
+            const hasGap = articles.some(
+              (a) => a.status.toLowerCase() === "gap" || a.status.toLowerCase() === "missing evidence"
+            );
+            const allCompliant =
+              articles.length > 0 &&
+              articles.every((a) => a.status.toLowerCase() === "compliant");
+            
+            return (
+              <Card
+                key={doc.id}
+                className="border-slate-800 bg-slate-900/70 hover:border-emerald-500/60 transition-colors cursor-pointer"
+                onClick={() => router.push(`/vault/${doc.id}`)}
+              >
+                <CardHeader className="pb-2 flex flex-row items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <CardTitle className="text-sm font-semibold text-slate-50">
                       {doc.filename}
                     </CardTitle>
-                    <p className="text-xs text-gray-500">
-                      {new Date(doc.uploadedAt).toLocaleDateString()}
-                      {doc.vaultEventId ? ` — ${doc.vaultEventId.slice(-8)}` : ""}
+                    <p className="text-[11px] text-slate-500">
+                      Uploaded: {uploaded} · Hash ID{" "}
+                      <span className="font-mono text-slate-400">
+                        {doc.hash ? doc.hash.slice(0, 6) : "—"}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-slate-400 line-clamp-2 max-w-xl">
+                      {doc.textPreview || "No preview available."}
                     </p>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    {doc.fpic?.items?.length ? (
-                      <Badge className="bg-cyan-900/60 text-cyan-300 border-cyan-700 text-xs">
-                        <Users className="w-3 h-3 mr-1" />
-                        Extra Context
+                  <div className="flex flex-col items-end gap-1">
+                    {fpicBadge(doc)}
+                    {allCompliant && (
+                      <Badge className="bg-emerald-500/20 text-emerald-200 border border-emerald-400/50 text-[10px]">
+                        Ready for retailer / OEM
                       </Badge>
-                    ) : null}
-                    {doc.signatureVerified && (
-                      <Badge className="bg-emerald-900/60 text-emerald-300 border-emerald-700 text-xs">
-                        Signed
+                    )}
+                    {hasGap && !allCompliant && (
+                      <Badge className="bg-rose-500/15 text-rose-300 border border-rose-400/60 text-[10px]">
+                        Needs remediation
                       </Badge>
                     )}
                   </div>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                <p className="text-sm text-gray-400 line-clamp-2">
-                  {doc.textPreview || "No preview available"}
-                </p>
-
-                <div className="mt-4 flex items-center justify-between">
-                  <div className="flex flex-wrap gap-1.5">
-                    {doc.passport?.articles?.map((a, i) => (
-                      <React.Fragment key={i}>{statusChip(a.status)}</React.Fragment>
-                    ))}
+                </CardHeader>
+                <CardContent className="pt-0 space-y-3">
+                  {articles.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {articles.map((a, idx) => (
+                        <span key={idx} className="text-[10px] uppercase font-medium">
+                          {a.article.replace("Article", "Art.")}: {statusChip(a.status)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+                    <p className="text-[11px] text-slate-500 max-w-md">
+                      Snapshot of {articles.length} mandatory articles & FPIC signals — the raw material for a verifiable battery passport.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="border-slate-700 text-[11px] text-slate-100"
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent card click
+                          router.push(`/vault/${doc.id}`);
+                        }}
+                      >
+                        Open Vault Record
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400 text-[11px]"
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent card click
+                          window.open(`/api/vault/${doc.id}`, "_blank");
+                        }}
+                      >
+                        View Full JSON
+                      </Button>
+                    </div>
                   </div>
-
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs text-cyan-400 hover:text-white"
-                      onClick={() => handleShareDoc(doc.id, doc.filename)}
-                    >
-                      <Share2 className="w-3 h-3 mr-1" />
-                      Share
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs"
-                      onClick={() => router.push(`/passport/${doc.id}`)}
-                    >
-                      View Record
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
-
-      {/* Bottom Bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur border-t border-white/10">
-        <div className="max-w-7xl mx-auto px-6 py-6 text-center">
-          <p className="text-sm font-medium text-gray-400">
-            Evidence slots are append-only.  
-            Signatures verify existence — not compliance or interpretation.
-          </p>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
-

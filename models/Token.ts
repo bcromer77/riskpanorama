@@ -4,7 +4,12 @@ import mongoose, { Schema, Document, Types, Model } from 'mongoose';
 export interface IToken extends Document {
     userId: Types.ObjectId;
     token: string;
-    type: 'emailVerification' | 'passwordReset';
+    // UPDATED: Added organisationInvite type
+    type: 'emailVerification' | 'passwordReset' | 'organisationInvite'; 
+    
+    // NEW: Target Organisation ID (Required for EPIC 1.2 Invites)
+    organisationId?: Types.ObjectId; 
+    
     createdAt: Date;
     expiresAt: Date;
 }
@@ -22,8 +27,19 @@ const TokenSchema: Schema = new Schema({
     },
     type: { 
         type: String, 
-        enum: ['emailVerification', 'passwordReset'], 
+        // UPDATED: Added 'organisationInvite'
+        enum: ['emailVerification', 'passwordReset', 'organisationInvite'], 
         required: true 
+    },
+    // NEW: Linked to the Organisation being invited to (Conditional requirement)
+    organisationId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Organisation',
+        required: function(this: IToken) {
+            // organisationId is ONLY required if the token type is 'organisationInvite'
+            return this.type === 'organisationInvite'; 
+        },
+        sparse: true, // Allows null/missing values if not an invite token
     },
     createdAt: { 
         type: Date, 
@@ -37,5 +53,5 @@ const TokenSchema: Schema = new Schema({
 });
 
 // We compile this model inside models/index.ts alongside User/Organisation, 
-// but define the schema here:
+// but define the schema here for export:
 export const TokenModel = (mongoose.models.Token as Model<IToken>) || mongoose.model<IToken>('Token', TokenSchema);

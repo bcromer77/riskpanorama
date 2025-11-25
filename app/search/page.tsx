@@ -11,311 +11,183 @@ import {
   Search,
   Zap,
   AlertOctagon,
-  X,
-  Filter,
-  Download,
-  Globe,
-  Radio,
+  Shield,
+  FileText,
   ExternalLink,
+  Sparkles,
+  Lock,
 } from "lucide-react";
 
-// -------------------------------
-// Types
-// -------------------------------
-type SearchResult = {
+type SourceResult = {
   id: string;
   title: string;
   snippet: string;
   source: string;
   score: number;
-  category: "FPIC / Indigenous" | "Geopolitical" | "Regulatory Horizon" | "Environmental";
-  // Deep link params for supply-chain page
-  deepLink?: {
-    country?: string;
-    corridor?: string;
-    filterType?: "fpic" | "geopolitical" | "regulatory";
-  };
+  hash?: string;
+  documentId?: string;
 };
 
-// -------------------------------
-// Helpers
-// -------------------------------
-function categoryBadge(cat: SearchResult["category"]) {
-  if (cat === "FPIC / Indigenous") {
-    return (
-      <Badge className="bg-violet-100 text-violet-800 border-violet-200 text-[10px] flex items-center gap-1">
-        <Radio className="w-3 h-3" />
-        FPIC / Indigenous
-      </Badge>
-    );
-  }
-  if (cat === "Geopolitical") {
-    return (
-      <Badge className="bg-rose-100 text-rose-800 border-rose-200 text-[10px] flex items-center gap-1">
-        <Globe className="w-3 h-3" />
-        Geopolitical
-      </Badge>
-    );
-  }
-  if (cat === "Regulatory Horizon") {
-    return (
-      <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px] flex items-center gap-1">
-        <AlertOctagon className="w-3 h-3" />
-        Regulatory Horizon
-      </Badge>
-    );
-  }
-  return (
-    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">
-      Environmental
-    </Badge>
-  );
-}
+type AgentReport = {
+  report: string;
+  sources: {
+    internal: SourceResult[];
+    external: SourceResult[];
+  };
+  remainingCredits?: number;
+  reportId?: string;
+  viewUrl?: string;
+};
 
-// -------------------------------
-// Main Component
-// -------------------------------
-export default function SearchPage() {
+export default function RiskIntelligencePage() {
   const router = useRouter();
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const [query, setQuery] = useState("China rare earth export curbs");
+  const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [report, setReport] = useState<AgentReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
+  const [showSources, setShowSources] = useState(true);
 
-  // Streaming text effect
+  const exampleQueries = [
+    "Could new FPIC laws in DRC invalidate our cobalt route to Europe?",
+    "What is the risk of Chinese rare earth export restrictions in 2026?",
+    "Is our Yukon lithium project exposed to indigenous land claims?",
+    "Namibia Marine Phosphate: Any veto risk from indigenous communities?",
+    "M23 rebel control of Goma — impact on our coltan supply chain?",
+  ];
+
+  const allSources = [
+    ...(report?.sources.internal.map(s => ({ ...s, type: "internal" as const })) ?? []),
+    ...(report?.sources.external.map(s => ({ ...s, type: "external" as const, source: s.source || "Live Intelligence" })) ?? []),
+  ].sort((a, b) => b.score - a.score);
+
   useEffect(() => {
     if (searching) {
-      const text =
-        "Analyzing X posts, regulatory filings, indigenous broadcasts, treaty databases, and corridor feeds…";
+      const text = "Agentic RAG active — scanning sealed evidence + live geopolitical signals (5 credits)…";
       let i = 0;
       const interval = setInterval(() => {
-        if (i < text.length) {
-          setStreamingText(text.slice(0, i + 1));
-          i++;
-        } else {
-          clearInterval(interval);
-        }
-      }, 30);
+        setStreamingText(text.slice(0, i + 1));
+        i++;
+        if (i > text.length) clearInterval(interval);
+      }, 25);
       return () => clearInterval(interval);
     } else {
       setStreamingText("");
     }
   }, [searching]);
 
-  const runSearch = () => {
+  const runAgent = async () => {
+    if (!query.trim()) return;
     setSearching(true);
-    setTimeout(() => {
-      setResults([
-        {
-          id: "1",
-          title: "China REE Export Curbs — Full Impact Report",
-          snippet:
-            "Dec 1 license regime could halt 6.2M EV production lines. Any product with >0.1% Chinese rare earths now requires Beijing re-export license. Analysts: 'This is the nuclear option.'",
-          source: "X • Reuters",
-          score: 0.98,
-          category: "Geopolitical",
-          deepLink: { country: "CN", filterType: "geopolitical" },
-        },
-        {
-          id: "2",
-          title: "M23 Corridor Disruption — DRC Cobalt Route Analysis",
-          snippet:
-            "Kolwezi–Zambia highway cut. Battery passport routes at risk of invalidation. M23 rebels control key highway from Kolwezi to Zambian border. Cobalt shipments halted.",
-          source: "Reuters • X",
-          score: 0.96,
-          category: "Geopolitical",
-          deepLink: { country: "CD", corridor: "DRC-Zambia", filterType: "geopolitical" },
-        },
-        {
-          id: "3",
-          title: "Telangana Political Risk — Mine Shutdown Manifesto",
-          snippet:
-            "Opposition party to phase out all mining if elected 2028. BRS party manifesto: 'No new mines, existing ones phased out.' Telangana hosts ~40% of India's graphite & lithium exploration.",
-          source: "X • The Hindu",
-          score: 0.95,
-          category: "Geopolitical",
-          deepLink: { country: "IN", filterType: "geopolitical" },
-        },
-        {
-          id: "4",
-          title: "Yukon FPIC Injunction — Kaska Dena Legal Challenge",
-          snippet:
-            "Court filing halts critical minerals road. Nickel/cobalt route to Alaska at risk. Kaska Dena Council seeks court order halting construction. Claims inadequate FPIC.",
-          source: "CBC • Indigenous radio",
-          score: 0.94,
-          category: "FPIC / Indigenous",
-          deepLink: { country: "CA", corridor: "Yukon-Alaska", filterType: "fpic" },
-        },
-        {
-          id: "5",
-          title: "Namibia Indigenous Veto Bill Draft",
-          snippet:
-            "Traditional authorities to get binding veto on new licenses. Bill gives traditional authorities binding veto on uranium/lithium permits. Expected Q4 2026.",
-          source: "Reuters Africa",
-          score: 0.92,
-          category: "Regulatory Horizon",
-          deepLink: { country: "NA", filterType: "regulatory" },
-        },
-        {
-          id: "6",
-          title: "Mexico Lithium Nationalization Expands",
-          snippet:
-            "Sheinbaum administration extends AMLO's lithium monopoly. All private concessions under review. EU/US cathode contracts face renegotiation or cancellation risk.",
-          source: "Bloomberg • X",
-          score: 0.91,
-          category: "Geopolitical",
-          deepLink: { country: "MX", filterType: "geopolitical" },
-        },
-        {
-          id: "7",
-          title: "Brazil Amazon Grid — Indigenous Veto Threat",
-          snippet:
-            "Acre transmission lines cross uncontacted territories. Federal prosecutors warn project violates FPIC under ILO 169. Could delay lithium transport from Bolivia border.",
-          source: "Folha • Amazonia radio",
-          score: 0.89,
-          category: "FPIC / Indigenous",
-          deepLink: { country: "BR", corridor: "Brazil-Bolivia", filterType: "fpic" },
-        },
-        {
-          id: "8",
-          title: "Myanmar Civil War Cuts China's REE Feedstock",
-          snippet:
-            "Kachin insurgents control 90% of heavy rare earth mines. China's southern refining hubs now running at 60% capacity. Supply disruption imminent.",
-          source: "Reuters • X battlefield reports",
-          score: 0.88,
-          category: "Geopolitical",
-          deepLink: { country: "MM", filterType: "geopolitical" },
-        },
-      ]);
+    setReport(null);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/agent/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query.trim() }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 402) {
+          setError("Insufficient credits — Agentic reports cost 5 credits each. Top up in Billing.");
+        } else if (res.status === 401) {
+          setError("Session expired. Please log in again.");
+        } else {
+          setError(data.error || "Agent failed. Please try again.");
+        }
+        return;
+      }
+
+      const data: AgentReport = await res.json();
+      setReport(data);
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    } catch (err) {
+      setError("Network error — check your connection and try again.");
+      console.error(err);
+    } finally {
       setSearching(false);
-      resultsRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 1200);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    runSearch();
-  };
-
-  const handleExportResults = () => {
-    alert(
-      "Export functionality: this would generate a CSV/JSON export of these results for counsel/Board packs."
-    );
-  };
-
-  const handleResultClick = (result: SearchResult) => {
-    if (!result.deepLink) return;
-    const params = new URLSearchParams();
-    if (result.deepLink.country) params.set("country", result.deepLink.country);
-    if (result.deepLink.corridor) params.set("corridor", result.deepLink.corridor);
-    if (result.deepLink.filterType) params.set("filter", result.deepLink.filterType);
-    router.push(`/supply-chain?${params.toString()}`);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* HERO + SEARCH */}
-      <header className="sticky top-0 z-50 bg-gradient-to-br from-slate-50 via-white to-emerald-50 border-b border-slate-200 shadow-lg backdrop-blur-xl bg-white/80">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-50">
+      {/* Hero Header */}
+      <header className="border-b border-emerald-500/20 bg-slate-950/90 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-start justify-between mb-8">
             <div>
-              <h1 className="text-4xl font-bold text-slate-900 animate-fade-in">
-                Supply Chain Risk Engine
+              <h1 className="text-5xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
+                Risk Intelligence Engine
               </h1>
-              <p className="text-lg text-slate-700 mt-2 max-w-3xl">
-                Ask questions about emerging FPIC disputes, regulatory horizon shifts, geopolitical
-                choke points, and corridor conflicts. Get AI‑analyzed intelligence from X,
-                indigenous radio, regulatory filings, and treaty databases.
-              </p>
-              <p className="mt-2 text-xs text-slate-500 uppercase tracking-wider">
-                Cross‑source search for counsel, CSOs, and Board risk committees.
+              <p className="text-xl text-slate-300 mt-3 max-w-4xl">
+                Strategic horizon scanning across your sealed evidence and live global risk signals.
               </p>
             </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-3 text-emerald-600 font-bold">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
-                </span>
-                LIVE • HORIZON ACTIVE
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="absolute inset-0 rounded-full bg-emerald-400 blur-xl animate-ping opacity-70"></div>
+                <div className="relative bg-emerald-500 rounded-full w-4 h-4"></div>
               </div>
-              <Badge className="bg-slate-900 text-slate-200 text-[10px] border border-slate-700">
-                X • Indigenous radio • Regulatory filings • Treaties
-              </Badge>
+              <span className="text-emerald-400 font-semibold tracking-wider">LIVE</span>
             </div>
           </div>
 
-          <Card className="shadow-2xl border-slate-200 bg-white/95 backdrop-blur-md">
-            <CardHeader className="pb-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-slate-700">
-                  <Zap className="w-6 h-6 text-emerald-600" />
-                  <h2 className="text-xl font-bold">Ask the Risk Engine</h2>
-                </div>
-                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px]">
-                  Natural language across all feeds
-                </Badge>
+          {/* Search Box */}
+          <Card className="border-emerald-500/30 bg-slate-900/80 backdrop-blur shadow-2xl">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <Zap className="w-7 h-7 text-emerald-400" />
+                <h2 className="text-2xl font-bold">Ask the Risk Agent • 5 Credits</h2>
               </div>
             </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="flex gap-3">
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="e.g. Could new FPIC or export laws invalidate our DRC → Sweden battery route?"
-                    className="h-12 text-base"
-                  />
-                  <Button
-                    type="submit"
-                    size="lg"
-                    disabled={searching}
-                    className="px-8 bg-emerald-600 hover:bg-emerald-700"
-                  >
-                    {searching ? (
-                      "Scanning…"
-                    ) : (
-                      <>
-                        Search <Search className="ml-2 w-4 h-4" />
-                      </>
-                    )}
-                  </Button>
-                </div>
-                {searching && (
-                  <p className="text-sm text-slate-500 font-mono animate-pulse">
-                    {streamingText}
-                  </p>
-                )}
+            <CardContent className="space-y-6">
+              <form onSubmit={(e) => { e.preventDefault(); runAgent(); }} className="flex gap-4">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="e.g. Could new FPIC laws block our lithium route from Chile?"
+                  className="h-14 text-lg bg-slate-950/70 border-slate-700 focus:border-emerald-500 placeholder:text-slate-500"
+                />
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={searching || !query.trim()}
+                  className="px-10 bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-bold"
+                >
+                  {searching ? "Scanning…" : "Run Agent"}
+                  {!searching && <Search className="ml-2 w-5 h-5" />}
+                </Button>
               </form>
 
-              {/* Example queries */}
-              {!searching && results.length === 0 && (
-                <div className="mt-6 pt-6 border-t">
-                  <p className="text-xs font-semibold text-slate-600 mb-3 uppercase tracking-wider">
-                    Example Queries
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      "China rare earth export curbs",
-                      "M23 DRC cobalt corridor",
-                      "Yukon FPIC injunction",
-                      "Namibia indigenous veto bill",
-                      "Mexico lithium nationalization",
-                      "Brazil Amazon FPIC disputes",
-                    ].map((ex) => (
+              {searching && (
+                <p className="text-emerald-400 font-mono text-sm animate-pulse">
+                  {streamingText}
+                </p>
+              )}
+
+              {/* Example Queries */}
+              {!report && !searching && (
+                <div className="pt-6 border-t border-slate-800">
+                  <p className="text-xs uppercase tracking-wider text-slate-500 mb-4">Strategic Examples</p>
+                  <div className="flex flex-wrap gap-3">
+                    {exampleQueries.map((q) => (
                       <Button
-                        key={ex}
+                        key={q}
                         variant="outline"
                         size="sm"
-                        className="text-xs"
+                        className="border-slate-700 text-xs hover:border-emerald-500 hover:text-emerald-400"
                         onClick={() => {
-                          setQuery(ex);
-                          setTimeout(() => runSearch(), 100);
+                          setQuery(q);
+                          setTimeout(runAgent, 300);
                         }}
                       >
-                        {ex}
+                        {q}
                       </Button>
                     ))}
                   </div>
@@ -327,126 +199,132 @@ export default function SearchPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-12">
-        {results.length > 0 && (
-          <div className="animate-fade-in" ref={resultsRef}>
-            <div className="flex items-center justify-between mb-6">
+
+        {/* Error State */}
+        {error && (
+          <Card className="mb-8 border-rose-500/50 bg-rose-950/50">
+            <CardContent className="pt-6 flex items-start gap-4">
+              <AlertOctagon className="w-8 h-8 text-rose-400 mt-1" />
               <div>
-                <h3 className="text-2xl font-bold flex items-center gap-2">
-                  <AlertOctagon className="w-6 h-6 text-slate-600" /> Risk Intelligence Results
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Ranked by relevance and risk exposure to your supply chain. Click any result to view on the map.
-                </p>
+                <h3 className="font-bold text-rose-300">Agent Failed</h3>
+                <p className="text-rose-200 text-sm mt-1">{error}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs flex items-center gap-1"
-                  onClick={handleExportResults}
-                >
-                  <Download className="w-3 h-3" />
-                  Export
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs flex items-center gap-1"
-                >
-                  <Filter className="w-3 h-3" />
-                  Filters
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setResults([]);
-                    setQuery("");
-                  }}
-                  className="text-xs"
-                >
-                  <X className="w-4 h-4 mr-1" />
-                  Clear
-                </Button>
-              </div>
-            </div>
+            </CardContent>
+          </Card>
+        )}
 
-            <div className="grid gap-4 md:grid-cols-2">
-              {results.map((r, idx) => (
-                <Card
-                  key={r.id}
-                  className="border-slate-200 hover:border-emerald-400 hover:shadow-lg transition-all duration-300 hover:-translate-y-1 cursor-pointer group"
-                  style={{ animationDelay: `${idx * 80}ms` }}
-                  onClick={() => handleResultClick(r)}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex justify-between items-start gap-3">
-                      <div className="flex-1">
-                        <CardTitle className="text-base flex items-center gap-2 group-hover:text-emerald-600 transition-colors">
-                          {r.title}
-                          <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </CardTitle>
-                        <p className="text-xs text-slate-500">{r.source}</p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px]">
-                          Match {(r.score * 100).toFixed(0)}%
-                        </Badge>
-                        {categoryBadge(r.category)}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="text-sm text-slate-700">
-                    {r.snippet}
-                    {r.deepLink && (
-                      <div className="mt-3 pt-3 border-t border-slate-100">
-                        <p className="text-xs text-emerald-600 font-medium flex items-center gap-1">
-                          <ExternalLink className="w-3 h-3" />
-                          Click to view on supply chain map
-                        </p>
-                      </div>
+        {/* Report */}
+        {report && (
+          <div ref={resultsRef} className="space-y-8">
+
+            {/* Synthesis */}
+            <Card className="border-emerald-500/40 bg-slate-900/80 shadow-2xl">
+              <CardHeader>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="text-2xl font-bold flex items-center gap-3">
+                      <Sparkles className="w-7 h-7 text-emerald-400" />
+                      Agentic Risk Synthesis
+                    </h3>
+                    {report.reportId && (
+                      <p className="text-xs text-slate-400 mt-2">
+                        Report ID: <span className="font-mono">{report.reportId.slice(-8)}</span>
+                        {report.viewUrl && (
+                          <a href={report.viewUrl} target="_blank" className="ml-3 text-emerald-400 hover:underline flex items-center gap-1">
+                            View Full Report <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </p>
                     )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                  </div>
+                  {report.remainingCredits !== undefined && (
+                    <Badge className="bg-emerald-900/80 text-emerald-300 text-lg px-4 py-2">
+                      <Lock className="w-4 h-4 mr-2" />
+                      {report.remainingCredits} Credits Left
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="prose prose-invert max-w-none text-slate-200 leading-relaxed text-lg">
+                  {report.report.split("\n").map((para, i) => (
+                    <p key={i} className="mb-4">{para || " "}</p>
+                  ))}
+                </div>
 
-            {/* Refinement panel */}
-            <div className="mt-8 p-6 bg-white rounded-xl border border-slate-200 shadow-sm">
-              <h4 className="text-sm font-semibold text-slate-700 mb-4">
-                Turn this into something you can take to the Board
-              </h4>
-              <div className="flex flex-wrap gap-3 text-xs">
-                <Button variant="outline" size="sm">
-                  Group by country
+                <Button
+                  variant="outline"
+                  className="mt-8 border-emerald-500/60 text-emerald-400 hover:bg-emerald-500/10"
+                  onClick={() => setShowSources(!showSources)}
+                >
+                  {showSources ? "Hide" : "Show"} Source Evidence ({allSources.length})
                 </Button>
-                <Button variant="outline" size="sm">
-                  Group by corridor
-                </Button>
-                <Button variant="outline" size="sm">
-                  Show only FPIC
-                </Button>
-                <Button variant="outline" size="sm">
-                  Show only horizon 2026–2030
-                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Sources */}
+            {showSources && (
+              <div>
+                <h3 className="text-xl font-bold mb-6 flex items-center gap-3">
+                  <Shield className="w-6 h-6 text-emerald-400" />
+                  Source Evidence & Audit Trail
+                </h3>
+                <div className="grid gap-5 md:grid-cols-2">
+                  {allSources.map((src) => (
+                    <Card
+                      key={src.id}
+                      className={`border ${src.type === "internal" ? "border-emerald-500/40 bg-emerald-950/30" : "border-cyan-500/40 bg-cyan-950/20"} hover:shadow-xl transition-all`}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex justify-between items-start">
+                          <CardTitle className="text-sm font-semibold">
+                            {src.title}
+                          </CardTitle>
+                          {src.type === "internal" ? (
+                            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-700 text-xs">
+                              <Shield className="w-3 h-3 mr-1" /> Sealed Vault
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-700 text-xs">
+                              <Zap className="w-3 h-3 mr-1" /> Live Intel
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2">
+                          Relevance: {(src.score * 100).toFixed(1)}%
+                          {src.hash && ` • Hash: ${src.hash.slice(0, 10)}...`}
+                        </p>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm text-slate-300 leading-relaxed">
+                          {src.snippet}
+                        </p>
+                        {src.type === "internal" && src.documentId && (
+                          <a
+                            href={`/vault/${src.documentId}`}
+                            className="inline-flex items-center gap-1 mt-3 text-xs text-emerald-400 hover:underline"
+                          >
+                            <FileText className="w-3 h-3" /> Open Sealed Document
+                          </a>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Empty state */}
-        {!searching && results.length === 0 && (
-          <div className="text-center py-20">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 mb-4">
-              <Search className="w-8 h-8 text-emerald-600" />
+        {/* Empty State */}
+        {!report && !searching && !error && (
+          <div className="text-center py-32">
+            <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-emerald-500/10 mb-8">
+              <Search className="w-12 h-12 text-emerald-400" />
             </div>
-            <h3 className="text-xl font-semibold text-slate-900 mb-2">
-              Ready to scan the horizon
-            </h3>
-            <p className="text-slate-600 max-w-md mx-auto">
-              Enter a query above to search across X posts, indigenous radio broadcasts, regulatory
-              filings, and treaty databases for emerging supply chain risks that could invalidate
-              your battery passports.
+            <h2 className="text-3xl font-bold mb-4">Ask Anything About Your Supply Chain Risk</h2>
+            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
+              The Risk Agent combines your sealed compliance evidence with live geopolitical, regulatory, and indigenous rights signals — in seconds.
             </p>
           </div>
         )}
