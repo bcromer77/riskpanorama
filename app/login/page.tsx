@@ -1,58 +1,32 @@
 "use client";
 
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { useState } from "react";
+import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export default function LoginPage() {
-  const supabase = createClientComponentClient();
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
 
-  const handleLogin = async (e: any) => {
-    e.preventDefault();
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+  useEffect(() => {
+    signIn("credentials", {
+      email: "you@rareearthminerals.ai",
+      password: "anything",
+      redirect: false,
+    }).then((res) => {
+      if (res?.ok) {
+        router.push("/instrument");
+      }
     });
-    if (error) setError(error.message);
-    else router.push("/dashboard/cooltipp");
-  };
+  }, [router]);
 
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-50">
-      <form
-        onSubmit={handleLogin}
-        className="bg-white p-8 rounded-2xl shadow-md w-96"
-      >
-        <h2 className="text-2xl font-semibold mb-6 text-center">
-          Sign in to CoolTipp
-        </h2>
-        <input
-          type="email"
-          placeholder="Email"
-          className="w-full border p-2 mb-4 rounded-md"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          className="w-full border p-2 mb-4 rounded-md"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <button
-          type="submit"
-          className="w-full bg-green-600 text-white p-2 rounded-md hover:bg-green-700"
-        >
-          Login
-        </button>
-        {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
-      </form>
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 to-emerald-950 flex items-center justify-center">
+      <div className="bg-slate-900/90 border border-emerald-800 rounded-2xl p-16 text-center">
+        <h1 className="text-5xl font-black text-emerald-400 mb-8">REM Risk Intelligence</h1>
+        <p className="text-2xl text-slate-300 mb-12">Founder Auto-Login</p>
+        <div className="text-8xl animate-pulse">🚀</div>
+        <p className="text-slate-400 mt-8 text-lg">Logging you in...</p>
+      </div>
     </div>
   );
 }
-

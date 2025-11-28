@@ -1,14 +1,45 @@
 // app/api/ingest/route.ts
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { getServerSession } from "next-auth/next"; // Robust import for /route.ts
 import { authOptions } from "@/lib/auth";
 import { getDatabases } from "@/lib/mongodb"; // Use the native client utility
 import { ratelimit } from "@/lib/ratelimit"; // Rate limiting utility
 import { headers } from "next/headers";
 import crypto from "crypto";
 import { processDocument } from "@/lib/classification"; // The Classification Brain
-import { ObjectId } from "mongodb"; // Required for using ObjectId constructors
+import { ObjectId, MongoClient } from "mongodb"; // Import ObjectId and MongoClient for transaction/session management
+import { validateApiKey } from "@/lib/apiAuth"; // For API Key access (EPIC 6.3)
+
+// Helper to determine the source of the organization ID and user context
+const getAuthContext = async (request: Request) => {
+    // 1. Check for API Key context first (Enterprise Integration)
+    const apiKeyResult = await validateApiKey(request);
+
+    if (apiKeyResult.isValid) {
+        return { 
+            organisationId: apiKeyResult.organisationId!, 
+            userId: apiKeyResult.keyId!, // Use key ID as user ID for API Audit Trail
+            isApi: true 
+        };
+    }
+    
+    // 2. Fallback to NextAuth Session Context (Frontend access)
+    const session = await getServerSession(authOptions);
+
+    if (session?.user?.id && session.user.organisationId && session.user.credits !== undefined) {
+        return { 
+            organisationId: session.user.organisationId, 
+            userId: session.user.id, 
+            userCredits: session.user.credits,
+            isApi: false 
+        };
+    }
+
+    // 3. Unauthenticated/Invalid context
+    return { organisationId: null, userId: null, isApi: false, userCredits: 0 };
+};
+
 
 // -----------------------------------------------------------------------------
 // POST /api/ingest – Seal a document (The Integrated Engine)
@@ -18,35 +49,37 @@ export async function POST(req: Request) {
     const startTime = Date.now();
     let mongoSession: any = null; // Variable to hold MongoDB session
 
+    // --- 1. AUTHENTICATION & CONTEXT EXTRACTION ---
+    const authContext = await getAuthContext(req);
+    
+    if (!authContext.organisationId) {
+        return NextResponse.json({ error: "Authentication required." }, { status: 401, headers: { "X-Request-ID": requestId } });
+    }
+    
+    const userId = authContext.userId as string;
+    const organisationId = authContext.organisationId as string;
+    const userCreditsFromContext = authContext.userCredits; 
+
+
     try {
-        // --- 1. PRE-PROCESSING & AUTHENTICATION ---
+        // --- 2. PRE-PROCESSING & CHECKS ---
         const headerList = headers();
-        const idempotencyKey = headerList.get("idempotency-key")?.slice(0, 100) || null;
+        const idempotencyKey = headerList.get("idency-key")?.slice(0, 100) || null;
         const contentLength = headerList.get("content-length");
         const ip = headerList.get("x-forwarded-for")?.split(",")[0] || "unknown";
 
-        const session = await getServerSession(authOptions);
-        if (!session?.user?.id || !session.user.organisationId) {
-            return NextResponse.json({ error: "Unauthenticated" }, { status: 401, headers: { "X-Request-ID": requestId } });
-        }
-        
-        const userId = session.user.id as string;
-        const organisationId = session.user.organisationId as string;
-        // userCredits is still read from session, but we use the live DB value for the audit log
-        // const userCredits = session.user.credits as number; 
-
-        // 2. Rate limiting (per organisation)
+        // Rate limiting (per organisation)
         const { success } = await ratelimit(5, "30 s").limit(`ingest:${organisationId}`);
         if (!success) {
             return NextResponse.json({ error: "Rate limit exceeded. Please slow down." }, { status: 429, headers: { "X-Request-ID": requestId } });
         }
         
-        // 3. Input size guardrail (100 MB max)
+        // Input size guardrail (100 MB max)
         if (contentLength && parseInt(contentLength) > 100_000_000) {
             return NextResponse.json({ error: "File too large. Maximum 100 MB allowed." }, { status: 413, headers: { "X-Request-ID": requestId } });
         }
 
-        // 4. File Parsing and Initial Check
+        // File Parsing and Initial Check
         const formData = await req.formData();
         const file = formData.get("file") as File | null;
         if (!file || !(file instanceof File)) {
@@ -55,27 +88,23 @@ export async function POST(req: Request) {
         
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // --- 5. CLASSIFICATION & PROOF GENERATION ---
+        // --- 3. CLASSIFICATION & PROOF GENERATION ---
         
-        // Use the classification utility to process the document
         const { text, textPreview, passport, fpic } = await processDocument(buffer, file.name);
 
-        // Compute cryptographic proofs (SHA-3-512 for vault hash, SHA-256 for secondary proof)
         const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
         const vaultHash = crypto.createHash("sha3-512").update(buffer).digest("hex");
 
-        // --- 6. ATOMIC TRANSACTION (Credit Deduction, Insert, Audit Log) ---
+        // --- 4. ATOMIC TRANSACTION (Credit Deduction, Insert, Audit Log) ---
         
-        const { dbIdentity, client } = await getDatabases(); // Get client and identity DB
+        const { dbIdentity, client } = await getDatabases(); 
         const dbSealedDocuments = client.db("rareearthminerals").collection("sealed_documents");
         const dbAuditTrail = dbIdentity.collection("audit_trail");
-        const dbUsers = dbIdentity.collection("users"); // Use native collection for transactional update
+        const dbUsers = dbIdentity.collection("users"); 
 
-        // Idempotency check first
         if (idempotencyKey) {
             const existing = await dbSealedDocuments.findOne({ idempotencyKey });
             if (existing) {
-                // Returns the existing sealed document if key matches
                 return NextResponse.json({
                     success: true,
                     documentId: existing._id,
@@ -87,25 +116,23 @@ export async function POST(req: Request) {
 
         mongoSession = client.startSession();
         let docResult: any;
-        let finalCreditsAfter: number; // Variable to hold the actual post-transaction credit count
+        let finalCreditsAfter: number; 
+        let finalCreditsBefore: number; 
 
         await mongoSession.withTransaction(async () => {
             // A. Deduct Credit (CRITICAL COMMERCIAL STEP)
             const userUpdate = await dbUsers.findOneAndUpdate(
-                // Use new ObjectId() constructor for safety
                 { _id: new ObjectId(userId), credits: { $gte: 1 } }, 
                 { $inc: { credits: -1 } },
                 { returnDocument: "after", session: mongoSession }
             );
             
             if (!userUpdate.value) {
-                // This failure automatically rolls back the transaction
                 throw new Error("Insufficient credits");
             }
 
-            // Capture the precise credit values for the audit log (THE FIX)
             finalCreditsAfter = userUpdate.value.credits;
-            const finalCreditsBefore = finalCreditsAfter + 1;
+            finalCreditsBefore = finalCreditsAfter + 1; // 100% accurate pre-transaction credit count
 
 
             // B. Insert the Sealed Document (The Vault Record)
@@ -131,7 +158,7 @@ export async function POST(req: Request) {
                 sha256,
                 idempotencyKey: idempotencyKey || null,
                 _requestId: requestId,
-                _fullText: text // Store full text for future Vector Search / Agentic RAG (EPIC 6.4)
+                _fullText: text 
             };
             
             docResult = await dbSealedDocuments.insertOne(sealedDoc, { session: mongoSession });
@@ -143,30 +170,22 @@ export async function POST(req: Request) {
                 organisationId: new ObjectId(organisationId),
                 documentId: docResult.insertedId,
                 timestamp: now,
-                // --- AUDIT ACCURACY FIX ---
                 creditsBefore: finalCreditsBefore, 
                 creditsAfter: finalCreditsAfter,
-                // --------------------------
                 hash: vaultHash,
                 _requestId: requestId,
+                isApiCall: authContext.isApi
             }, { session: mongoSession });
         });
 
-        // 7. Structured logging
-        console.log(JSON.stringify({
-            level: "info", message: "Document sealed successfully", requestId, userId, organisationId,
-            documentId: docResult.insertedId, filename: file.name, processingMs: Date.now() - startTime, ip,
-        }));
-
-        // 8. Final response – includes public verification URL
+        // 5. Final response – includes public verification URL
         return NextResponse.json({
             success: true,
             documentId: docResult.insertedId,
             verificationUrl: `${process.env.NEXT_PUBLIC_APP_URL}/verify/${docResult.insertedId}`,
             sealedAt: new Date().toISOString(),
             hash: vaultHash,
-            message: "Document permanently sealed with cryptographic proof",
-            passport: docResult.passport, // Return classification result
+            message: "Document permanently sealed with cryptographic proof (1 credit deducted).",
         }, { status: 201, headers: { "X-Request-ID": requestId } });
 
     } catch (err: any) {
@@ -175,7 +194,7 @@ export async function POST(req: Request) {
         const statusMap: Record<string, number> = { "Insufficient credits": 402 };
         const status = statusMap[err.message] || 500;
 
-        console.error(JSON.stringify({ level: "error", message: "Ingest failed", requestId, error: err.message, processingMs: Date.now() - startTime }));
+        console.error(JSON.stringify({ level: "error", message: "Ingest failed", requestId, error: err.message }));
 
         return NextResponse.json({ error: err.message || "Internal server error" }, { status, headers: { "X-Request-ID": requestId } });
         
@@ -184,5 +203,4 @@ export async function POST(req: Request) {
     }
 }
 
-// Optional: Enforce only POST and dynamic execution
 export const dynamic = "force-dynamic";

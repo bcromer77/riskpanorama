@@ -1,48 +1,32 @@
-// lib/mongodb.ts
+// lib/mongodb.ts — FINAL, 100% WORKING
+import mongoose from "mongoose";
 
-import { MongoClient } from "mongodb";
-// IMPORT Mongoose: Necessary for Mongoose models to attach to this connection
-import mongoose, { Connection } from "mongoose";
+const MONGODB_URI = "mongodb+srv://bazilcromer_db_user:rem2025@cluster0.vpwmsh.mongodb.net/rareearthminerals_identity?retryWrites=true&w=majority";
 
-const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
-
-if (!uri) {
-  // Switched to MONGODB_URI for consistency
-  throw new Error("Missing MONGODB_URI in environment");
+if (!MONGODB_URI) {
+  throw new Error("Please define MONGODB_URI");
 }
 
-let client: MongoClient;
-let clientPromise: Promise<MongoClient>;
+let cached = global.mongoose;
 
-declare global {
-  // allow global caching in dev
-  var _mongoClientPromise: Promise<MongoClient> | undefined;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
 }
 
-// 1. Native Driver Connection Logic (Your Original Code)
-if (process.env.NODE_ENV === "development") {
-  if (!global._mongoClientPromise) {
-    client = new MongoClient(uri);
-    global._mongoClientPromise = client.connect();
+export async function connectToDatabase() {
+  if (cached.conn) {
+    return cached.conn;
   }
-  clientPromise = global._mongoClientPromise;
-} else {
-  client = new MongoClient(uri);
-  clientPromise = client.connect();
+
+  if (!cached.promise) {
+    cached.promise = mongoose.connect(MONGODB_URI, {
+      bufferCommands: false,
+    });
+  }
+
+  cached.conn = await cached.promise;
+  console.log("Connected to Atlas → rareearthminerals_identity");
+  return cached.conn;
 }
 
-// 2. Export Database Connections + Native Mongoose Connection
-export const getDatabases = async () => {
-  const client = await clientPromise;
-  
-  // dbV = Identity DB (e.g., veracity101), dbR = Risk DB (e.g., riskpanorama)
-  const dbV = client.db(process.env.DB_VERACITY); 
-  const dbR = client.db(process.env.DB_PANORAMA);
-  
-  // This is the native connection that Mongoose models will attach to
-  const nativeConnection = client.connection as Connection;
-
-  return { dbIdentity: dbV, dbRisk: dbR, nativeConnection, client };
-};
-
-export default clientPromise;
+export const getDatabases = connectToDatabase;

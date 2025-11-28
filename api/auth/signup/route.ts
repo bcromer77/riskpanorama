@@ -1,12 +1,15 @@
 // app/api/auth/signup/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { connectDB } from "@/lib/db"; 
-import { getModel } from "@/lib/models"; // CRITICAL: Use the new model getter
+import { connectDB } from "@/lib/db"; // Your connection utility
+import { getModel } from "@/lib/models"; // The new model getter utility
 
+/**
+ * Handles POST requests for user sign-up using the safe model getter.
+ */
 export async function POST(req: NextRequest) {
   try {
-    // 1. Connect to the database (Must be run first)
+    // 1. Connect to the database
     await connectDB();
 
     // 2. Get Models safely using the helper function
@@ -70,7 +73,6 @@ export async function POST(req: NextRequest) {
 
   } catch (error) {
     console.error("Sign-up Error:", error);
-    // In case of any database error, roll back and return a 500
     return NextResponse.json(
       { message: "Internal server error during sign-up." },
       { status: 500 }

@@ -1,7 +1,3 @@
-// app/page.tsx — THE KILLER PAGE
-// This is the page that ends every conversation about "Do we really need this?" with silence.
-// Built for the people who sign the Battery Passport Act compliance reports.
-
 "use client";
 
 import React from "react";

@@ -1,12 +1,17 @@
-import "./globals.css";
-import Navbar from "@/components/shared/Navbar";
+import './globals.css'; // Assuming your global styles are here
+import SessionWrapper from '@/components/providers/SessionProvider';
+import Navbar from '@/components/shared/Navbar';
+import { Inter } from 'next/font/google'; // Example font import
 
+const inter = Inter({ subsets: ['latin'] });
+
+// We define Metadata here (Server Component requirement)
 export const metadata = {
-  title: "RareEarthMinerals.ai — Global Supply-Chain & Horizon Scanning",
-  description:
-    "Integrated regulatory, supplier, and signal insights powered by MongoDB Atlas Vector Search.",
+  title: 'RareEarthMinerals.ai - Evidence Vault',
+  description: 'The world-class immutable evidence platform for battery supply chains.',
 };
 
+// The root layout must be a Server Component
 export default function RootLayout({
   children,
 }: {
@@ -14,19 +19,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-[#FAFAF6] text-slate-800 min-h-screen flex flex-col">
-        <Navbar />
-        <main className="flex-1">{children}</main>
-        <footer className="border-t border-slate-200 py-4 text-center text-xs text-slate-500 bg-white/70">
-          <p>
-            © {new Date().getFullYear()} RareEarthMinerals.ai — Built with{" "}
-            <span className="text-emerald-600 font-medium">
-              MongoDB Atlas Vector Search
-            </span>
-          </p>
-        </footer>
+      <body className={inter.className}>
+        {/* CRITICAL: SessionProvider wraps the entire application. */}
+        <SessionWrapper>
+            {/* The Navbar is rendered inside the wrapper */}
+            <Navbar />
+            
+            {/* Main content */}
+            <div className="pt-[50px]"> {/* Add padding for the fixed/sticky navbar */}
+                {children}
+            </div>
+        </SessionWrapper>
       </body>
     </html>
   );
 }
-
