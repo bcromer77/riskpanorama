@@ -3,7 +3,14 @@
 import { useMemo, useState } from "react";
 import { useEvents, useEventPack } from "@/lib/hooks/useChronozone";
 import dynamic from "next/dynamic";
-
+const { pack, loading: packLoading, error: packError, refetch } = useEventPack(selectedEventId);<RightPanel
+  selectedEventId={selectedEventId}
+  setSelectedEventId={setSelectedEventId}
+  pack={pack}
+  packLoading={packLoading}
+  packError={packError}
+  refetchPack={refetch}
+/>
 // Dynamically import the map component — disables SSR to prevent "window is not defined"
 const WorldMonitorMap = dynamic(
   () => import("@/components/worldmonitor/WorldMonitorMap"),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import type { ChronozoneEvent, EventPack } from "../api";
 import { getEvents, getEventPack } from "../api";
 
@@ -39,6 +39,20 @@ export function useEventPack(eventId?: string | null) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const refetch = useCallback(async () => {
+    if (!eventId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await getEventPack(eventId);
+      setPack(r);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load event pack");
+    } finally {
+      setLoading(false);
+    }
+  }, [eventId]);
+
   useEffect(() => {
     if (!eventId) {
       setPack(null);
@@ -67,5 +81,5 @@ export function useEventPack(eventId?: string | null) {
     };
   }, [eventId]);
 
-  return { pack, loading, error };
+  return { pack, loading, error, refetch };
 }
