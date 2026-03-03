@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
-
+import { OutcomeHero } from "@/components/home/OutcomeHero";
+import { RiskStrip } from "@/components/home/RiskStrip";
+import { HomeActionCard } from "@/components/home/HomeActionCard";
 function HomeCard({
+
+
   href,
   label,
   title,
