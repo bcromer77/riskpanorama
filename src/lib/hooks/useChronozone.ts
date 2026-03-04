@@ -1,8 +1,10 @@
 "use client";
 
+"use client";
+
 import { useEffect, useState, useCallback } from "react";
-import type { ChronozoneEvent, EventPack } from "../api";
-import { getEvents, getEventPack } from "../api";
+import { getEvents, getEventPack } from "@/lib/api";
+import type { ChronozoneEvent, EventPack } from "@/lib/api";
 
 export function useEvents(opts?: { from?: string; to?: string; category?: string }) {
   const [events, setEvents] = useState<ChronozoneEvent[]>([]);
@@ -28,13 +30,17 @@ export function useEvents(opts?: { from?: string; to?: string; category?: string
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts?.from, opts?.to, opts?.category]);
 
   return { events, loading, error };
 }
 
-export function useEventPack(eventId?: string | null) {
+interface UseEventPackOptions {
+  eventId?: string | null;
+  pollIntervalMs?: number; // e.g. 45000 for 45-second live updates
+}
+
+export function useEventPack({ eventId, pollIntervalMs }: UseEventPackOptions = {}) {
   const [pack, setPack] = useState<EventPack | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +59,7 @@ export function useEventPack(eventId?: string | null) {
     }
   }, [eventId]);
 
+  // Initial fetch
   useEffect(() => {
     if (!eventId) {
       setPack(null);
@@ -79,7 +86,18 @@ export function useEventPack(eventId?: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, refetch]);
+
+  // Optional live polling (only when pollIntervalMs > 0)
+  useEffect(() => {
+    if (!eventId || !pollIntervalMs || pollIntervalMs <= 0) return;
+
+    const interval = setInterval(() => {
+      refetch();
+    }, pollIntervalMs);
+
+    return () => clearInterval(interval);
+  }, [eventId, pollIntervalMs, refetch]);
 
   return { pack, loading, error, refetch };
 }

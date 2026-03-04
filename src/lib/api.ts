@@ -1,53 +1,58 @@
 export type LatLng = { lat: number; lng: number };
 
-export type ChronozoneEvent = {
-  id: string;
-  title: string;
-  category: string; // "energy" | "shipping" | ...
-  severity?: "low" | "medium" | "high";
-  startTime?: string; // ISO
-  location: LatLng;
-  summary?: string;
-  context?: { tags?: string[]; regions?: string[]; dependencies?: string[] };
-};
-
-export type ChronozoneSignal = {
-  id: string;
-  eventId: string;
-  time: string; // ISO
-  sourceType: "x" | "news" | "official" | "other";
-  sourceRef?: string;
-  confidence: "high" | "medium" | "low";
-  text: string;
-  tags?: string[];
-};
 export type SatelliteFrame = {
   label: "before" | "after";
-  ts: string;            // ISO timestamp
-  url: string;           // image url (can be stub)
-  provider?: string;     // "NASA Worldview" | "Sentinel-2" | etc
+  ts: string; // ISO
+  url: string; // image url (can be stub or provider url)
+  provider?: string; // "NASA GIBS" | "Sentinel-2" | etc
   cloudPct?: number;
 };
 
 export type SatelliteLayer = {
   center: LatLng;
   zoom?: number;
-  frames: [SatelliteFrame, SatelliteFrame]; // before/after
+  frames: SatelliteFrame[]; // allow N frames (timeline), not just exactly two
 };
 
 export type ChronozoneEvent = {
-  // ...
+  id: string;
+  title: string;
+  category: string;
+  severity?: "low" | "medium" | "high";
+  startTime?: string; // ISO
+  location: LatLng;
+  summary?: string;
   context?: {
     tags?: string[];
     regions?: string[];
     dependencies?: string[];
-    satellite?: SatelliteLayer;   // ✅ add this
+    satellite?: SatelliteLayer;
   };
 };
+
+export type ChronozoneSignal = {
+  id: string;
+  eventId: string;
+  time: string; // ISO
+  sourceType: "x" | "news" | "official" | "other" | "satellite" | "firms" | "ais";
+  sourceRef?: string;
+  confidence: "high" | "medium" | "low";
+  text: string;
+  tags?: string[];
+
+  // Crucial: allows RightPanel to render evidence without ?.
+  evidence?: {
+    kind?: "satellite" | "photo" | "video" | "doc";
+    capturedAt?: string;
+    cloudPct?: number;
+    previewUrl?: string;
+  };
+};
+
 export type SecondOrderRisk = {
   id: string;
   eventId: string;
-  timeHorizon: string; // "0-60 days" | "30-90 days" | "3-12 months"
+  timeHorizon: string;
   sector: string;
   risk: string;
   mechanism: string;
@@ -64,15 +69,6 @@ export type ProcurementSignal = {
 
 export type ExposureAssessment = {
   assumptions: string[];
-  observed: string[]; // short bullet statements
-  assessment: string; // 1–2 sentence
-  implication: string; // strong commercial line
-  rangePct?: { low: number; high: number }; // optional
-  confidence: "low" | "medium" | "high";
-  confidenceRationale?: string;
-};
-export type ExposureAssessment = {
-  assumptions: string[];
   observed: string[];
   assessment: string;
   implication: string;
@@ -80,6 +76,7 @@ export type ExposureAssessment = {
   confidence: "low" | "medium" | "high";
   confidenceRationale?: string;
 };
+
 export type EventPack = {
   event: ChronozoneEvent;
   signals: ChronozoneSignal[];
@@ -104,6 +101,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => "");
     throw new Error(`API ${res.status} ${res.statusText}: ${text}`);
   }
+
   return (await res.json()) as T;
 }
 
