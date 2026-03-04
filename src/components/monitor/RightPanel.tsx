@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { EventPack, ChronozoneSignal } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { EventPack } from "@/lib/api";
 
 function formatTs(ts: string | undefined): string {
   if (!ts) return "—";
   const d = new Date(ts);
+  const t = d.getTime();
+  if (!Number.isFinite(t)) return "—";
   return d.toLocaleString([], {
     month: "short",
     day: "numeric",
@@ -47,78 +49,65 @@ export default function RightPanel({
   const [filterTag, setFilterTag] = useState<string | null>(null);
   const [useScrubber, setUseScrubber] = useState(true);
   const [expandedSignal, setExpandedSignal] = useState<string | null>(null);
+  const [scrubPct, setScrubPct] = useState(100);
 
-  // Local signals state (updated by polling or initial pack)
-  const [signals, setSignals] = useState<ChronozoneSignal[]>(pack?.signals || []);
+  const feedRef = useRef<HTMLDivElement>(null);
 
-  // Sync signals when pack changes
-  useEffect(() => {
-    if (pack?.signals) {
-      setSignals(pack.signals);
-    }
-  }, [pack?.signals]);
+  const signals = pack?.signals ?? [];
 
-  // ── Live polling: refetch pack every 45s when live mode is on ──
-  useEffect(() => {
-    if (!liveMode || packLoading || !selectedEventId) return;
+  // ── Robust min/max time across all signals ──
+  const { minTime, maxTime } = useMemo(() => {
+    const times = signals
+      .map((s) => new Date(s.time).getTime())
+      .filter(Number.isFinite);
 
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/v1/chronozone/events/${selectedEventId}/pack`);
-        if (!res.ok) throw new Error("Poll failed");
-        const newPack: EventPack = await res.json();
+    const now = Date.now();
+    return {
+      minTime: times.length ? Math.min(...times) : now,
+      maxTime: times.length ? Math.max(...times) : now,
+    };
+  }, [signals]);
 
-        // Merge new signals (safe de-dupe even if id missing)
-        setSignals((prev) => {
-          const sigKey = (s: ChronozoneSignal) =>
-            s.id || `${s.time}-${s.sourceType}-${(s.text || "").slice(0, 40)}`;
-          const existing = new Set(prev.map(sigKey));
-          const incoming = (newPack.signals || []).filter((s) => !existing.has(sigKey(s)));
-          if (incoming.length === 0) return prev;
-          console.log(`Live update: ${incoming.length} new signals`);
-          return [...prev, ...incoming].sort(
-            (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
-          );
-        });
-      } catch (err) {
-        console.error("Live poll error:", err);
-      }
-    }, 45000);
+  // Scrubber-derived time
+  const scrubEndTs = useMemo(() => {
+    if (signals.length === 0) return maxTime;
+    const pct = clamp(scrubPct, 0, 100) / 100;
+    return Math.round(minTime + (maxTime - minTime) * pct);
+  }, [minTime, maxTime, scrubPct, signals.length]);
 
-    return () => clearInterval(interval);
-  }, [liveMode, packLoading, selectedEventId]);
-
-  // ── Time cursor follows satDate when not live ──
+  // Final cursor: live = latest, scrubber wins when enabled, else satDate end-of-day
   const cursorEndTs = useMemo(() => {
-    if (liveMode) return Infinity; // live always shows all/latest
-    return new Date(`${satDate}T23:59:59Z`).getTime();
-  }, [liveMode, satDate]);
+    if (liveMode) return Infinity;
+    if (useScrubber) return scrubEndTs;
+    const t = new Date(`${satDate}T23:59:59Z`).getTime();
+    return Number.isFinite(t) ? t : scrubEndTs;
+  }, [liveMode, useScrubber, scrubEndTs, satDate]);
 
-  const filteredSignals = useMemo(
-    () => signals.filter((s) => new Date(s.time).getTime() <= cursorEndTs),
-    [signals, cursorEndTs]
-  );
+  const filteredSignals = useMemo(() => {
+    if (liveMode) return signals;
+    return signals.filter((s) => {
+      const t = new Date(s.time).getTime();
+      return Number.isFinite(t) && t <= cursorEndTs;
+    });
+  }, [signals, cursorEndTs, liveMode]);
 
   const displaySignals = useMemo(() => {
-    let list = liveMode ? signals.slice().reverse() : filteredSignals.slice().reverse();
-    if (filterTag) {
-      list = list.filter((s) => s.tags?.includes(filterTag));
-    }
+    let list = filteredSignals.slice().reverse();
+    if (filterTag) list = list.filter((s) => s.tags?.includes(filterTag));
     return list;
-  }, [liveMode, filteredSignals, signals, filterTag]);
+  }, [filteredSignals, filterTag]);
 
   const hasAbsence = useMemo(() => {
-    const last = signals[signals.length - 1]?.time;
-    if (!last) return false;
-    const hoursSinceLast = (Date.now() - new Date(last).getTime()) / 3600000;
+    if (!Number.isFinite(maxTime)) return false;
+    const hoursSinceLast = (Date.now() - maxTime) / 3600000;
     return hoursSinceLast > 24;
-  }, [signals]);
+  }, [maxTime]);
 
   const convergence = useMemo(() => {
     const sig = signals;
     const sources = new Set(sig.map((s) => s.sourceType).filter(Boolean));
     const sourced = sig.filter((s) => !!s.sourceRef).length;
-    const score = sources.size * 20 + Math.min(60, sourced * 10); // capped
+    const score = sources.size * 20 + Math.min(60, sourced * 10);
     const label = score >= 80 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
     const className =
       score >= 80
@@ -126,7 +115,14 @@ export default function RightPanel({
         : score >= 50
         ? "bg-amber-100 text-amber-800"
         : "bg-slate-100 text-slate-700";
-    return { sources: [...sources], sourceCount: sources.size, sourcedCount: sourced, score, label, className };
+    return {
+      sources: [...sources],
+      sourceCount: sources.size,
+      sourcedCount: sourced,
+      score,
+      label,
+      className,
+    };
   }, [signals]);
 
   const filterByTag = (tag: string) => {
@@ -160,8 +156,7 @@ export default function RightPanel({
   // ── Risk scores for radar (demo-safe) ──
   const risk = useMemo(() => {
     const sev = pack?.event?.severity;
-    const severity =
-      sev === "high" ? 85 : sev === "medium" ? 60 : sev === "low" ? 35 : 50;
+    const severity = sev === "high" ? 85 : sev === "medium" ? 60 : sev === "low" ? 35 : 50;
 
     const sig = signals || [];
     const uniqueSources = new Set(sig.map((s) => s.sourceType).filter(Boolean)).size;
@@ -174,15 +169,33 @@ export default function RightPanel({
     return { probability, severity, confidence };
   }, [pack?.event?.severity, signals]);
 
-  // ── Auto-scroll to latest in live mode ──
-  useEffect(() => {
-    if (liveMode) {
-      const container = document.querySelector(".overflow-y-auto");
-      if (container) container.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }, [liveMode, displaySignals]);
+  // ── Latest signal key (true newest by time) ──
+  const latestSignalKey = useMemo(() => {
+    if (!signals.length) return null;
+    const newest = [...signals]
+      .map((s) => ({ s, t: new Date(s.time).getTime() }))
+      .filter((x) => Number.isFinite(x.t))
+      .sort((a, b) => b.t - a.t)[0]?.s;
 
-  // ── Derived UI values ──
+    if (!newest) return null;
+    return newest.id || `${newest.time}-${newest.sourceType}-${(newest.text || "").slice(0, 40)}`;
+  }, [signals]);
+
+  // ── Auto-scroll only when newest changes ──
+  useEffect(() => {
+    if (liveMode && feedRef.current) {
+      feedRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [liveMode, latestSignalKey]);
+
+  // ── Sync satDate when scrubber moves (only on day change) ──
+  useEffect(() => {
+    if (liveMode || !useScrubber) return;
+    if (!Number.isFinite(cursorEndTs)) return;
+    const day = new Date(cursorEndTs).toISOString().slice(0, 10);
+    if (day !== satDate) setSatDate(day);
+  }, [cursorEndTs, liveMode, useScrubber, satDate, setSatDate]);
+
   const event = pack?.event;
   const title = event?.title || (packLoading ? "Loading event…" : "No event selected");
   const hasData = !!pack && !packLoading && !packError;
@@ -194,6 +207,7 @@ export default function RightPanel({
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-500 font-medium">Chronozone Event</div>
           <h1 className="text-2xl font-bold text-slate-900 truncate max-w-[340px] mt-1">{title}</h1>
+
           {event && (
             <div className="flex items-center gap-3 mt-2 text-sm text-slate-600">
               {event.category && (
@@ -201,6 +215,7 @@ export default function RightPanel({
                   {event.category}
                 </span>
               )}
+
               {event.severity && (
                 <span
                   className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
@@ -214,9 +229,11 @@ export default function RightPanel({
                   {event.severity.toUpperCase()}
                 </span>
               )}
+
               {event.startTime && <span>Started: {formatTs(event.startTime)}</span>}
             </div>
           )}
+
           {hasData && (
             <div className="flex items-center gap-2 mt-2">
               <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${convergence.className}`}>
@@ -238,6 +255,7 @@ export default function RightPanel({
               Export Signals
             </button>
           )}
+
           <button
             onClick={() => setSelectedEventId(null)}
             className="p-2.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
@@ -310,14 +328,190 @@ export default function RightPanel({
 
             {/* Tab Content */}
             <div className="pt-6 space-y-10">
+              {/* Exposure tab */}
+              {activeTab === "exposure" && (
+                <div className="space-y-8">
+                  <div className="p-6 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50/70 to-white shadow-sm">
+                    <div className="flex items-start justify-between gap-6 mb-6">
+                      <div>
+                        <h2 className="text-2xl font-bold text-amber-900">Exposure Assessment</h2>
+                        <p className="text-amber-800 mt-1.5">Where pre-priced reality creates deferred risk</p>
+                      </div>
+                      {pack.assessment?.confidence && (
+                        <span
+                          className={`inline-flex px-5 py-2 text-sm font-semibold rounded-full border shadow-sm ${
+                            pack.assessment.confidence === "high"
+                              ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                              : pack.assessment.confidence === "medium"
+                              ? "bg-amber-100 text-amber-800 border-amber-200"
+                              : "bg-slate-100 text-slate-700 border-slate-200"
+                          }`}
+                        >
+                          Confidence: {pack.assessment.confidence.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-slate-800 text-lg leading-relaxed font-medium">
+                      {pack.assessment?.implication ||
+                        "Current market pricing lags emerging physical & behavioral signals — contracts signed now likely embed unpriced second-order exposure."}
+                    </p>
+
+                    <div className="mt-8 grid gap-6 md:grid-cols-2">
+                      <div className="p-5 bg-white rounded-xl border border-slate-200">
+                        <h3 className="text-base font-semibold text-slate-900 mb-3">Current Assumptions</h3>
+                        <ul className="space-y-2.5 text-slate-700">
+                          {pack.assessment?.assumptions?.map((a, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-slate-400 mt-1">•</span>
+                              <span>{a}</span>
+                            </li>
+                          )) || (
+                            <>
+                              <li className="flex items-start gap-2">
+                                <span className="text-slate-400 mt-1">•</span> Supply & logistics continuity fully priced
+                              </li>
+                              <li className="flex items-start gap-2">
+                                <span className="text-slate-400 mt-1">•</span> No major escalation or pass-through expected
+                              </li>
+                            </>
+                          )}
+                        </ul>
+                      </div>
+
+                      <div className="p-5 bg-white rounded-xl border border-slate-200">
+                        <h3 className="text-base font-semibold text-slate-900 mb-3">Observed Signals</h3>
+                        <ul className="space-y-2.5 text-slate-700">
+                          {pack.assessment?.observed?.map((o, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-slate-400 mt-1">•</span>
+                              <span>{o}</span>
+                            </li>
+                          )) || (
+                            <>
+                              <li className="flex items-start gap-2">
+                                <span className="text-slate-400 mt-1">•</span> Disruption indicators rising
+                              </li>
+                              <li className="flex items-start gap-2">
+                                <span className="text-slate-400 mt-1">•</span> Operator / supplier communication lag
+                              </li>
+                            </>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {pack.assessment?.rangePct && (
+                      <div className="mt-8 p-6 bg-amber-50/50 rounded-xl border border-amber-200">
+                        <div className="text-lg font-bold text-amber-900 mb-2">
+                          Estimated Mispricing Range: {pack.assessment.rangePct.low}–{pack.assessment.rangePct.high}%
+                        </div>
+                        <p className="text-amber-800">
+                          Contracts / positions initiated now likely carry deferred exposure — second-order effects not yet reflected in pricing.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Procurement Signals */}
+                  <section className="space-y-6">
+                    <h3 className="text-xl font-bold text-slate-900">Procurement Signals</h3>
+                    {pack.procurementSignals?.length ? (
+                      <div className="space-y-5">
+                        {pack.procurementSignals.map((p) => (
+                          <div
+                            key={p.id}
+                            className="p-6 bg-white rounded-2xl border border-slate-200 hover:border-slate-300 transition-all shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-6">
+                              <div className="flex-1">
+                                <div className="font-semibold text-slate-900 text-lg">{p.signal}</div>
+                                <p className="mt-3 text-slate-700 leading-relaxed">{p.implication}</p>
+                              </div>
+                              <span className="inline-flex px-4 py-2 text-sm font-medium rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                                {p.type.toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 bg-slate-50 rounded-2xl text-center text-slate-500 border border-slate-200">
+                        No procurement signals detected yet.
+                      </div>
+                    )}
+                  </section>
+                </div>
+              )}
+
+              {/* Decision Risk tab */}
+              {activeTab === "decision" && (
+                <div className="space-y-8">
+                  <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <h2 className="text-2xl font-bold text-slate-900 mb-6">Decision Risk Lens</h2>
+
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <div className="p-6 bg-slate-50 rounded-xl border border-slate-200">
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Why this bid looks unusually cheap</h3>
+                        <ul className="space-y-3 text-slate-700">
+                          <li className="flex items-start gap-3">
+                            <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                            <span>Pre-event pricing assumptions still embedded</span>
+                          </li>
+                          <li className="flex items-start gap-3">
+                            <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                            <span>Fuel / freight / insurance surcharges deferred</span>
+                          </li>
+                          <li className="flex items-start gap-3">
+                            <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                            <span>Single corridor or feedstock dependency not priced</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="p-6 bg-slate-50 rounded-xl border border-slate-200">
+                        <h3 className="text-lg font-semibold text-slate-900 mb-4">Why known suppliers are silent</h3>
+                        <ul className="space-y-3 text-slate-700">
+                          <li className="flex items-start gap-3">
+                            <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                            <span>Already see upstream cost pressure or delivery risk</span>
+                          </li>
+                          <li className="flex items-start gap-3">
+                            <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                            <span>Avoiding mispriced exposure in forward commitments</span>
+                          </li>
+                          <li className="flex items-start gap-3">
+                            <span className="text-amber-500 text-xl mt-0.5">⚠</span>
+                            <span>Internal capacity / hedging constraints</span>
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div className="mt-8 p-6 bg-white rounded-xl border border-slate-200">
+                      <h3 className="text-lg font-semibold text-slate-900 mb-4">Absence Signals (our unique wedge)</h3>
+                      <p className="text-slate-700 mb-4">What is **not** being said or bid often reveals more than what is.</p>
+                      <div className="flex items-center gap-4">
+                        <div className="text-3xl font-bold text-blue-600">
+                          {pack.procurementSignals?.filter((p) => p.type === "absence").length || 0}
+                        </div>
+                        <div className="text-slate-600">
+                          absence indicators detected — silence from incumbents is a leading risk signal.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Reality tab */}
               {activeTab === "reality" && (
                 <div className="space-y-6">
                   <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
                     {/* Header */}
                     <div className="flex items-center justify-between mb-6">
                       <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
-                        Intelligence Feed
-                        <span className="text-sm font-normal text-slate-500">(real-time)</span>
+                        Intelligence Feed <span className="text-sm font-normal text-slate-500">(real-time)</span>
                       </h2>
 
                       <div className="flex items-center gap-4">
@@ -330,6 +524,8 @@ export default function RightPanel({
                               setLiveMode(on);
                               setExpandedSignal(null);
                               if (on) {
+                                setFilterTag(null);
+                                setScrubPct(100);
                                 setUseScrubber(false);
                               } else {
                                 setUseScrubber(true);
@@ -362,15 +558,11 @@ export default function RightPanel({
                         <div className="text-xs text-emerald-800">High</div>
                       </div>
                       <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
-                        <div className="text-xl font-bold text-amber-700">
-                          {signals.filter((s) => s.sourceType === "x").length}
-                        </div>
+                        <div className="text-xl font-bold text-amber-700">{signals.filter((s) => s.sourceType === "x").length}</div>
                         <div className="text-xs text-amber-800">X</div>
                       </div>
                       <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
-                        <div className="text-xl font-bold text-blue-700">
-                          {signals.filter((s) => s.sourceRef).length}
-                        </div>
+                        <div className="text-xl font-bold text-blue-700">{signals.filter((s) => s.sourceRef).length}</div>
                         <div className="text-xs text-blue-800">Sourced</div>
                       </div>
                       <div className="p-3 bg-purple-50 rounded-xl border border-purple-100">
@@ -381,7 +573,7 @@ export default function RightPanel({
                       </div>
                     </div>
 
-                    {/* Scrubber placeholder – add real logic if needed */}
+                    {/* Scrubber */}
                     <div className="mb-6 p-5 bg-slate-50 rounded-xl border border-slate-200">
                       <div className="flex items-center justify-between mb-4">
                         <div className="text-base font-semibold text-slate-900">Timeline Scrubber</div>
@@ -397,36 +589,45 @@ export default function RightPanel({
                         </label>
                       </div>
 
-                      {liveMode && (
-                        <div className="mt-3 text-sm text-slate-600">
-                          Live mode shows latest signals (turn Live off to scrub the timeline).
-                        </div>
+                      {!liveMode && useScrubber && (
+                        <>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={scrubPct}
+                            onChange={(e) => setScrubPct(Number(e.target.value))}
+                            className="w-full h-3 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                          />
+                          <div className="mt-3 text-sm text-slate-600 text-center">
+                            Showing up to: {formatTs(new Date(cursorEndTs).toISOString())}
+                          </div>
+                        </>
                       )}
+
+                      {liveMode && <div className="mt-3 text-sm text-slate-600">Live mode shows latest signals (turn Live off to scrub the timeline).</div>}
                     </div>
 
-                    {/* Living signal feed – cleaned version */}
-                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 scroll-smooth">
+                    {/* Feed */}
+                    <div ref={feedRef} className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 scroll-smooth">
                       {displaySignals.length > 0 ? (
-                        displaySignals.map((s, idx) => {
-                          const sid = s.id || `${s.time}-${s.sourceType}-${(s.text || "").slice(0, 40)}`;
-                          const isLatest = liveMode && idx === 0;
-                          const isExpanded = expandedSignal === sid;
-
-                          const cardClass =
-                            "p-5 rounded-xl border transition-all duration-500 cursor-pointer group " +
-                            (isLatest
-                              ? "border-blue-400 bg-blue-50/30 animate-pulse-slow shadow-lg scale-[1.02]"
-                              : "border-slate-200 hover:border-slate-300 bg-white");
+                        displaySignals.map((s) => {
+                          const sigKey = s.id || `${s.time}-${s.sourceType}-${(s.text || "").slice(0, 40)}`;
+                          const isLatest = liveMode && sigKey === latestSignalKey;
 
                           return (
                             <div
-                              key={sid}
+                              key={sigKey}
                               onClick={() => {
                                 const d = new Date(s.time);
-                                setSatDate(d.toISOString().slice(0, 10));
-                                setExpandedSignal((prev) => (prev === sid ? null : sid));
+                                if (Number.isFinite(d.getTime())) setSatDate(d.toISOString().slice(0, 10));
+                                setExpandedSignal((prev) => (prev === sigKey ? null : sigKey));
                               }}
-                              className={cardClass}
+                              className={`p-5 rounded-xl border transition-all duration-500 cursor-pointer ${
+                                isLatest
+                                  ? "border-blue-400 bg-blue-50/30 animate-pulse-slow shadow-lg scale-[1.02]"
+                                  : "border-slate-200 hover:border-slate-300 bg-white"
+                              } group`}
                             >
                               <div className="flex items-start justify-between gap-4">
                                 <div className="flex-1">
@@ -439,30 +640,7 @@ export default function RightPanel({
                                     )}
                                   </div>
 
-                                  <p className={"text-slate-700 " + (isExpanded ? "" : "line-clamp-3")}>
-                                    {s.text}
-                                  </p>
-
-                                  {s.evidence && (
-                                    <div className="mt-3 text-xs text-slate-600 flex flex-wrap gap-4">
-                                      {s.evidence.kind && <span>Kind: {String(s.evidence.kind).toUpperCase()}</span>}
-                                      {s.evidence.capturedAt && (
-                                        <span>🛰️ Captured: {formatTs(s.evidence.capturedAt)}</span>
-                                      )}
-                                      {s.evidence.cloudPct != null && <span>Cloud: {s.evidence.cloudPct}%</span>}
-                                      {s.evidence.previewUrl && (
-                                        <a
-                                          href={s.evidence.previewUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-blue-600 hover:text-blue-800"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          Preview →
-                                        </a>
-                                      )}
-                                    </div>
-                                  )}
+                                  <p className={`text-slate-700 ${expandedSignal === sigKey ? "" : "line-clamp-3"}`}>{s.text}</p>
 
                                   {s.tags?.length > 0 && (
                                     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -473,12 +651,11 @@ export default function RightPanel({
                                             e.stopPropagation();
                                             filterByTag(tag);
                                           }}
-                                          className={
-                                            "px-2.5 py-1 text-xs rounded-full border transition-colors " +
-                                            (filterTag === tag
+                                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                            filterTag === tag
                                               ? "bg-slate-800 text-white border-slate-800"
-                                              : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100")
-                                          }
+                                              : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                                          }`}
                                         >
                                           {tag}
                                         </button>
@@ -493,14 +670,13 @@ export default function RightPanel({
                                       {String(s.sourceType).toUpperCase()}
                                     </span>
                                     <span
-                                      className={
-                                        "px-2.5 py-1 text-xs font-medium rounded-full " +
-                                        (s.confidence === "high"
+                                      className={`px-2.5 py-1 text-xs font-medium rounded-full ${
+                                        s.confidence === "high"
                                           ? "bg-emerald-100 text-emerald-800"
                                           : s.confidence === "medium"
                                           ? "bg-amber-100 text-amber-800"
-                                          : "bg-slate-100 text-slate-700")
-                                      }
+                                          : "bg-slate-100 text-slate-700"
+                                      }`}
                                     >
                                       {String(s.confidence).toUpperCase()}
                                     </span>
@@ -522,17 +698,17 @@ export default function RightPanel({
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setExpandedSignal((prev) => (prev === sid ? null : sid));
+                                        setExpandedSignal((prev) => (prev === sigKey ? null : sigKey));
                                       }}
                                       className="text-sm text-slate-500 hover:text-slate-700"
                                     >
-                                      {isExpanded ? "Collapse" : "Expand"}
+                                      {expandedSignal === sigKey ? "Collapse" : "Expand"}
                                     </button>
 
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        navigator.clipboard.writeText(s.text);
+                                        navigator.clipboard.writeText(s.text || "");
                                       }}
                                       className="text-sm text-slate-500 hover:text-slate-700"
                                     >
@@ -551,35 +727,25 @@ export default function RightPanel({
                       )}
                     </div>
 
-                    {/* Absence alert */}
                     {hasAbsence && (
                       <div className="mt-6 p-5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800">
                         <div className="font-semibold mb-1">Absence Alert</div>
-                        <div className="text-sm">
-                          No new signals in the last 24 hours — unusual silence. Monitor for withdrawal or delayed reporting.
-                        </div>
+                        <div className="text-sm">No new signals in the last 24 hours — unusual silence. Monitor for withdrawal or delayed reporting.</div>
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
+              {/* Radar tab */}
               {activeTab === "radar" && (
                 <div className="space-y-6">
                   <div className="p-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <h2 className="text-2xl font-bold text-slate-900 mb-4">Decision Radar</h2>
-                    <p className="text-sm text-slate-600 mb-6">
-                      Probability vs Severity with confidence ring (evidence strength).
-                    </p>
-
+                    <p className="text-sm text-slate-600 mb-6">Probability vs Severity with confidence ring (evidence strength).</p>
                     <div className="mt-6">
-                      <RiskPlane
-                        probability={risk.probability}
-                        severity={risk.severity}
-                        confidence={risk.confidence}
-                      />
+                      <RiskPlane probability={risk.probability} severity={risk.severity} confidence={risk.confidence} />
                     </div>
-
                     <div className="mt-5 text-sm text-slate-600">
                       <b>How to read:</b> further right = more likely, higher = more severe. Bigger ring = stronger evidence.
                     </div>
@@ -587,10 +753,12 @@ export default function RightPanel({
                 </div>
               )}
 
-              {/* Placeholder for other tabs – implement as needed */}
-              {activeTab === "exposure" && <div>Exposure assessment content (TBD)</div>}
-              {activeTab === "decision" && <div>Decision risk content (TBD)</div>}
-              {activeTab === "satellite" && <div>Satellite viewer / timeline (TBD)</div>}
+              {/* Satellite tab placeholder */}
+              {activeTab === "satellite" && (
+                <div className="p-8 bg-slate-50 rounded-2xl border border-slate-200 text-slate-600">
+                  Satellite context lives in the main map — click a signal to sync the imagery date automatically.
+                </div>
+              )}
             </div>
           </>
         )}
@@ -599,7 +767,6 @@ export default function RightPanel({
   );
 }
 
-// Simple RiskPlane component (unchanged)
 function RiskPlane({
   probability,
   severity,
@@ -620,11 +787,9 @@ function RiskPlane({
 
   return (
     <svg width={w} height={h} className="bg-slate-50 rounded-xl border border-slate-200">
-      {/* Axes */}
       <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="#94a3b8" />
       <line x1={pad} y1={h - pad} x2={pad} y2={pad} stroke="#94a3b8" />
 
-      {/* Labels */}
       <text x={pad - 30} y={pad + 5} fontSize="12" fill="#334155">
         Severity ↑
       </text>
@@ -632,7 +797,6 @@ function RiskPlane({
         Probability →
       </text>
 
-      {/* Point + ring */}
       <circle cx={x} cy={y} r={6} fill="#2563eb" />
       <circle cx={x} cy={y} r={ring} fill="none" stroke="#2563eb" strokeOpacity={0.3} strokeWidth={3} />
     </svg>
