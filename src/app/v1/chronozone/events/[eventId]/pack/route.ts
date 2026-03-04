@@ -1,5 +1,41 @@
 import type { EventPack } from "@/lib/api";
+import type { EventPack } from "@/lib/api";
 
+export const runtime = "nodejs";
+
+const ALIASES: Record<string, string> = {
+  "tel-aviv": "fp-tel-aviv",
+  "ras-laffan": "evt_ras_laffan_2026_03_02",
+  "strait-of-hormuz": "evt_hormuz_2026_03_02",
+};
+
+const PACKS: Record<string, EventPack> = {
+  // ... your packs ...
+};
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ eventId: string }> }
+) {
+  const { eventId } = await params;
+
+  const normalizedId = ALIASES[eventId] ?? eventId;
+  const pack = PACKS[normalizedId];
+
+  if (!pack) {
+    return new Response(JSON.stringify({ error: "EVENT_NOT_FOUND", eventId }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const cloned: EventPack = structuredClone(pack);
+  cloned.signals = [...cloned.signals].sort(
+    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+  );
+
+  return Response.json(cloned);
+}
 export const runtime = "nodejs";
 
 // ── Helpers to avoid mutation and ensure determinism ──
